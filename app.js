@@ -145,7 +145,7 @@ const camera = createCamera({ onCapture({ dataUrl, originalImage, sample }) {
 document.querySelectorAll('.open-camera').forEach(button => button.addEventListener('click', () => camera.open()));
 document.querySelectorAll('.add-photo').forEach(button => button.addEventListener('click', () => { camera.close(); resetUpload(); $('upload-title').innerHTML = 'What does <em>your Ithaca</em> look like?'; openDialog('upload-dialog'); }));
 async function preparePhoto(file) {
-  $('file-error').textContent = ''; selectedPhoto = null; $('photo-preview').hidden = true;
+  $('file-error').textContent = ''; selectedPhoto = null; capturedOriginal = null; isSampleCapture = false; document.querySelector('.consent span').textContent = 'This is my photo, and I’m happy for it to be part of the painting.'; $('photo-preview').hidden = true;
   if (!file) return;
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { $('file-error').textContent = 'Choose a JPG, PNG, or WebP photo.'; return; }
   if (file.size > 15 * 1024 * 1024) { $('file-error').textContent = 'That photo is a little large. Choose one under 15 MB.'; return; }
@@ -212,6 +212,7 @@ if (document.modelContext?.registerTool) {
   const lifecycle = new AbortController();
   const register = tool => { try { Promise.resolve(document.modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {} };
   register({ name: 'filter_canvas_by_place', description: 'Filter the visible Paint Ithaca canvas. Use all or an exact displayed place name.', inputSchema: { type: 'object', properties: { place: { type: 'string' } }, required: ['place'], additionalProperties: false }, annotations: { readOnlyHint: false }, execute(input) { if (!input || typeof input.place !== 'string') throw new Error('A place is required.'); setPlace(input.place); return { place: selectedPlace }; } });
+  register({ name: 'open_interactive_camera', description: 'Open the interactive watercolor camera viewfinder. Camera permission is requested only when Enable camera is pressed.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false }, execute() { camera.open(); return { cameraDialogOpen: true, cameraAccessRequested: false }; } });
   register({ name: 'start_photo_contribution', description: 'Open the photo contribution form. Does not select, upload, or save a photo.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false }, execute() { resetUpload(); openDialog('upload-dialog'); return { formOpen: true, storage: 'device-only-demo' }; } });
   window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
 }

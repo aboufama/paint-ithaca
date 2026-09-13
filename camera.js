@@ -80,6 +80,11 @@ export function createCamera({ onCapture }) {
       video.classList.toggle('mirrored',track.getSettings().facingMode==='user');
       canvas.classList.toggle('mirrored',track.getSettings().facingMode==='user');
       ready(video);
+      navigator.mediaDevices.enumerateDevices?.().then(devices=>{
+        if(token!==generation||!active||sample)return;
+        flip.disabled=devices.filter(device=>device.kind==='videoinput').length<2;
+        flip.title=flip.disabled?'Only one camera is available':'Switch front and back camera';
+      }).catch(()=>{});
     } catch(error) {
       if(token!==generation||!dialog.open)return;
       stop();status.textContent='CAMERA IS OFF';
