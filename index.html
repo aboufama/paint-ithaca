@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f6f1">
+  <meta name="description" content="A community sketchbook of Ithaca. Add a little of your day to a living mosaic of the places we share.">
+  <title>Paint Ithaca — a city, seen together</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='13' height='13' rx='5' fill='%23e5ad9f'/%3E%3Crect x='17' y='2' width='13' height='13' rx='5' fill='%23a8bbb3'/%3E%3Crect x='2' y='17' width='13' height='13' rx='5' fill='%23bcb4d9'/%3E%3Crect x='17' y='17' width='13' height='13' rx='5' fill='%23e8d293'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=DM+Sans:wght@400;450;500;550;600;650;700&family=Fraunces:ital,wght@0,400;0,450;0,500;1,400;1,450&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#canvas">Skip to the canvas</a>
+  <header class="site-header">
+    <a class="wordmark" href="./" aria-label="Paint Ithaca home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>paint ithaca<span class="wordmark-dot">.</span></a>
+    <nav aria-label="Main navigation"><a class="nav-active" href="#canvas">The canvas</a><button data-dialog="how-dialog">How it works</button><a href="https://github.com/aboufama/paint-ithaca" target="_blank" rel="noreferrer">The project <span aria-hidden="true">↗</span></a></nav>
+    <button class="button button-small open-camera"><span aria-hidden="true">◎</span> Open camera</button>
+  </header>
+
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow"><span class="little-sun" aria-hidden="true">☼</span> A COMMUNITY SKETCHBOOK · ITHACA, NY</p><h1 id="page-title">A city, <em>seen together.</em></h1><p class="intro-copy">Point your camera at your little corner of Ithaca.<br>Watch it turn to watercolor. Leave a piece for everyone.</p></div>
+      <div class="intro-note"><span class="note-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>A little of your day.<br>A little more of our city.</span><span class="note-arrow" aria-hidden="true">⤵</span></div>
+    </section>
+
+    <section class="workspace" id="canvas" aria-label="Community canvas">
+      <div class="canvas-column">
+        <div class="canvas-topbar"><div class="edition-heading"><span class="eyebrow">THE DAILY CANVAS</span><h2 id="edition-title">A September kind of day</h2></div><span class="demo-badge">Sample edition</span></div>
+        <div class="artboard" id="artboard">
+          <div class="mosaic" id="mosaic" aria-label="Ithaca photo mosaic"></div>
+          <div class="board-signature"><span>many moments, one Ithaca.</span><span class="signature-mark" aria-hidden="true">p.i.</span></div>
+          <div class="board-empty" id="board-empty" hidden>No views here yet. Be the first to add one.</div>
+        </div>
+        <div class="canvas-controls"><div class="playback"><button class="icon-button" id="play-toggle" aria-label="Pause the moving mosaic"><span id="play-icon" aria-hidden="true">Ⅱ</span></button><span id="play-label">A living painting</span><span class="soundless">· sound off</span></div><button class="text-button" id="watch-film"><span aria-hidden="true">▷</span> Watch the daily film <span aria-hidden="true">↗</span></button></div>
+        <div class="canvas-caption"><p><span id="view-count">6</span> views <span>·</span> <span id="place-count">6</span> places <span>·</span> one shared canvas</p><span class="caption-note">Drag to move pigment · tap to explore</span></div>
+        <section class="local-section" id="local-section" hidden aria-labelledby="local-heading"><div class="local-heading"><h3 id="local-heading">Your little pieces</h3><span>Saved on this device</span></div><div class="local-grid" id="local-grid"></div></section>
+      </div>
+
+      <aside class="studio" aria-label="Canvas tools and contributions">
+        <section class="place-panel"><h3>Find your Ithaca</h3><p>Every place has its own color.</p><div class="place-filters" id="place-filters" aria-label="Filter by place"></div></section>
+        <section class="wash-panel"><div class="wash-heading"><h3>A touch of watercolor</h3><span aria-hidden="true">◌</span></div><div class="view-switch" role="group" aria-label="Canvas style"><button class="selected" id="painted-view" aria-pressed="true">Painted</button><button id="original-view" aria-pressed="false">Original</button></div><label class="range-label" for="wash">Water amount <output id="wash-value" for="wash">40%</output></label><input id="wash" type="range" min="0" max="100" value="40"><div class="range-ends" aria-hidden="true"><span>A little</span><span>A lot</span></div></section>
+        <section class="contribute-card"><span class="card-kicker">THERE’S A PLACE FOR YOUR VIEW</span><h3>Leave a little<br><em>color behind.</em></h3><p>Point your camera.<br>Watch your world turn to watercolor.</p><button class="button open-camera"><span aria-hidden="true">◎</span> Open camera</button><button class="text-button add-photo upload-alternative">or choose a photo</button></section>
+        <div class="demo-note"><span aria-hidden="true">✳</span><p>You’re in the sketchbook demo. Your photos stay in this browser.</p></div>
+      </aside>
+    </section>
+
+    <section class="process-strip" aria-label="How your photo becomes a painting"><div><span class="step-number peach">01</span><p><strong>Notice something.</strong><span>Open your camera. Find your corner.</span></p></div><span class="process-connector" aria-hidden="true">⤳</span><div><span class="step-number lavender">02</span><p><strong>Share your little piece.</strong><span>Watch it become watercolor. Capture it.</span></p></div><span class="process-connector" aria-hidden="true">⤳</span><div><span class="step-number green">03</span><p><strong>See what we make together.</strong><span>A mosaic of moments, made daily.</span></p></div></section>
+  </main>
+  <footer><span class="footer-brand">Made of Ithaca. Made by us.</span><div><button data-dialog="credits-dialog">Photo credits</button><span>Inspired by <a href="https://sudoaquarelle.com/" target="_blank" rel="noreferrer">Sudo Aquarelle ↗</a></span><span class="footer-coordinates">42.4440° N, 76.5019° W</span></div></footer>
+
+  <dialog id="camera-dialog" aria-labelledby="camera-title">
+    <div class="camera-top"><div><p class="eyebrow">YOUR WORLD IS THE PALETTE</p><h2 id="camera-title">Ithaca, through <em>your eyes.</em></h2></div><button class="dialog-close icon-button" aria-label="Close camera">×</button></div>
+    <div class="camera-viewfinder" id="camera-live-content">
+      <video id="camera-video" autoplay muted playsinline aria-label="Live camera preview"></video>
+      <canvas id="camera-paint" aria-label="Live watercolor camera preview"></canvas>
+      <div class="viewfinder-corner top-left" aria-hidden="true"></div><div class="viewfinder-corner top-right" aria-hidden="true"></div><div class="viewfinder-corner bottom-left" aria-hidden="true"></div><div class="viewfinder-corner bottom-right" aria-hidden="true"></div>
+      <div class="camera-top-overlay"><span id="camera-status" role="status">CONNECTING YOUR CAMERA</span><span class="camera-private">Only on your device</span></div>
+      <div class="camera-message" id="camera-message"><span class="camera-symbol" aria-hidden="true">◎</span><h3>Let’s see your Ithaca.</h3><p>Allow camera access to turn the view in front of you into a living watercolor. Nothing leaves your device.</p><button class="button" id="camera-enable">Enable camera</button><button class="text-button" id="camera-sample">Try the sample camera ↗</button><button class="text-button add-photo">Choose a photo instead</button></div>
+      <div id="camera-flash" aria-hidden="true"></div>
+      <div class="camera-mode-row"><button id="camera-mode" aria-pressed="true">✳ Watercolor</button><span>Move slowly. Let the colors find you.</span></div>
+    </div>
+    <div class="camera-bottom"><div class="camera-water-control"><label for="camera-water">Water <output id="camera-water-value" for="camera-water">55%</output></label><input id="camera-water" type="range" min="0" max="100" value="55"></div><div class="shutter-group"><button id="camera-shutter" aria-label="Capture this view" disabled><span></span></button><span id="camera-capture-label">Capture this view</span></div><button class="camera-flip" id="camera-flip" aria-label="Switch front and back camera" disabled><span aria-hidden="true">⇄</span><span>Flip camera</span></button></div>
+    <p class="camera-effect-note" id="camera-effect-note">Move your camera. Watch color flow, blend, and settle on paper.</p>
+  </dialog>
+  <dialog id="upload-dialog" aria-labelledby="upload-title"><button class="dialog-close icon-button" aria-label="Close contribution form">×</button><div id="upload-form-panel"><p class="eyebrow">ONE PHOTO. A LITTLE PIECE OF YOU.</p><h2 id="upload-title">What does <em>your Ithaca</em> look like?</h2><p>It doesn’t have to be extraordinary. It just has to be yours.</p><form id="upload-form"><label class="dropzone" id="dropzone" for="photo-input"><span class="upload-symbol" aria-hidden="true">＋</span><strong>Choose a photo</strong><span>or drop one here · JPG, PNG, WebP · up to 15 MB</span><img id="photo-preview" alt="Your selected photo" hidden></label><input class="file-input" id="photo-input" type="file" accept="image/jpeg,image/png,image/webp"><p class="form-error" id="file-error" role="alert"></p><label for="photo-place">Where’s your little corner?</label><select id="photo-place" required><option value="">Choose a place in Ithaca</option></select><label for="photo-caption">A few words <span class="optional">(optional)</span></label><input id="photo-caption" type="text" maxlength="100" placeholder="The lake was extra quiet this morning…"><label class="consent"><input id="photo-consent" type="checkbox" required><span>This is my photo, and I’m happy for it to be part of the painting.</span></label><div class="form-note">Demo contribution · saved only in this browser. Your photo is resized and location metadata is removed.</div><button class="button submit-button" type="submit" id="submit-photo">Add my little piece <span aria-hidden="true">↗</span></button><p class="form-error" id="submit-error" role="alert"></p></form></div><div class="success-panel" id="upload-success" hidden><span class="success-flower" aria-hidden="true">✳</span><p class="eyebrow">A LITTLE MORE ITHACA</p><h2>Your view belongs <em>here.</em></h2><img id="success-photo" alt="Your contribution"><p>Your photo is now on your demo canvas. It’s saved on this device, ready for you to come back to.</p><button class="button" id="back-to-canvas">See it on the canvas ↗</button><button class="text-button" id="add-another">Add another moment</button></div></dialog>
+
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><button class="dialog-close icon-button" aria-label="Close photo details">×</button><img id="detail-image" alt=""><p class="eyebrow" id="detail-place"></p><h2 id="detail-title"></h2><p id="detail-caption"></p><p class="detail-credit" id="detail-credit"></p></dialog>
+  <dialog id="film-dialog" aria-labelledby="film-title"><button class="dialog-close icon-button" aria-label="Close daily film">×</button><p class="eyebrow">SIX LITTLE PIECES, MOVING TOGETHER</p><h2 id="film-title">The daily <em>painting.</em></h2><video id="daily-film" controls playsinline loop preload="none" aria-label="Daily Ithaca mosaic film"></video><p id="film-description">A 12-second moving mosaic, compiled from the credited sample photos. Your browser-only contributions aren’t included in this film.</p><a class="text-button" id="download-film" href="#">Save an 8-second preview ↓</a></dialog>
+  <dialog id="how-dialog" aria-labelledby="how-title"><button class="dialog-close icon-button" aria-label="Close how it works">×</button><p class="eyebrow">AN OPEN COMMUNITY EXPERIMENT</p><h2 id="how-title">Small moments.<br><em>A shared portrait.</em></h2><div class="how-step"><span>01</span><div><h3>You notice. You share.</h3><p>Add a photo and choose a place. A familiar street, a quiet gorge, the light on the lake.</p></div></div><div class="how-step"><span>02</span><div><h3>Our city becomes a palette.</h3><p>Explore the mosaic by place and soften it with a watercolor wash inspired by Sudo Aquarelle.</p></div></div><div class="how-step"><span>03</span><div><h3>Each day gets a painting.</h3><p>Preview a moving watercolor canvas here. The daily community film will be supplied by the existing backend.</p></div></div><div class="form-note"><strong>This is a proof of concept.</strong> Photos you add are stored on your device, not shared with other people or sent to the daily job. This frontend is ready to be connected to the existing backend.</div></dialog>
+  <dialog id="credits-dialog" aria-labelledby="credits-title"><button class="dialog-close icon-button" aria-label="Close photo credits">×</button><p class="eyebrow">THE PEOPLE BEHIND THE PICTURES</p><h2 id="credits-title">A little <em>gratitude.</em></h2><p>This sample canvas uses openly licensed photos of Ithaca. Photos are cropped, color treated, and animated for the demo.</p><div id="credit-list"></div><p>Watercolor interaction inspiration: <a href="https://sudoaquarelle.com/" target="_blank" rel="noreferrer">Sudo Aquarelle</a>. This demo independently recreates water flow, pigment deposition, and textured paper in WebGL2.</p></dialog>
+  <button class="mobile-camera open-camera"><span aria-hidden="true">◎</span> Open camera <span class="mobile-camera-note">Paint your little piece</span></button>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>
