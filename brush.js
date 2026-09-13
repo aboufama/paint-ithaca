@@ -9,7 +9,7 @@ export class Brush {
     const rowDuration = 1150, row = Math.floor(elapsed / rowDuration), t = (elapsed % rowDuration) / rowDuration;
     const travel = .5 - .5 * Math.cos(Math.PI * t);
     const x = row % 2 ? .95 - travel * .9 : .05 + travel * .9;
-    const y = .07 + row * .112 + Math.sin(t * Math.PI) * .018;
+    const y = .07 + row * .112 + Math.sin(t * Math.PI) * .029;
     return { x: (x + motion.x * .035) * this.canvas.width, y: (y + motion.y * .025) * this.canvas.height };
   }
   paint(elapsed, motion) {
@@ -19,7 +19,7 @@ export class Brush {
     this.dab(this.point(elapsed, motion), elapsed); this.lastTime = elapsed;
   }
   dab(point, time) {
-    const { ctx, canvas } = this; const radius = canvas.height * (.066 + .009 * Math.sin(time * .009));
+    const { ctx, canvas } = this; const radius = canvas.height * (.094 + .012 * Math.sin(time * .009));
     const angle = Math.sin(time * .002) * .12;
     ctx.save(); ctx.translate(point.x, point.y); ctx.rotate(angle); ctx.scale(.63, 1);
     const wash = ctx.createRadialGradient(0, 0, radius * .24, 0, 0, radius);

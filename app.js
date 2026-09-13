@@ -32,7 +32,7 @@ const session = new HoldSession({
   onFinish() {
     engine.setRecording(false); state('settling'); hold.disabled = true;
     $('instruction').textContent = 'A moment to settle.';
-    settleTimer = setTimeout(finalize, 550); schedule();
+    settleTimer = setTimeout(finalize, 2200); schedule();
   },
   onReset() { resetPainting(); }
 });
@@ -223,6 +223,6 @@ window.addEventListener('pageshow',event=>{
 });
 // One structured entry point mirrors the one deliberate gesture. It never grants camera access.
 if(document.modelContext?.registerTool){
-  try {Promise.resolve(document.modelContext.registerTool({name:'paint_sample_moment',description:'Record a watercolor reveal from the sample camera for a bounded duration. Does not access a physical camera or upload anything.',inputSchema:{type:'object',properties:{durationMs:{type:'number',minimum:300,maximum:12000}},required:['durationMs'],additionalProperties:false},annotations:{readOnlyHint:false},async execute(input){if(!input||!Number.isFinite(input.durationMs)||input.durationMs<300||input.durationMs>12000)throw new Error('Duration must be between 300 and 12000 ms.');if(sourceType!=='sample'||!ready||session.state!=='ready')throw new Error('The sample camera must be ready.');const reviewed=new Promise(resolve=>reviewWaiters.push(resolve));begin();await new Promise(resolve=>setTimeout(resolve,input.durationMs));release();await reviewed;return {state:session.state,durationMs:session.duration,format:recordedBlob?.type||'image/png',recordedBytes:recordedBlob?.size||0};}})).catch(()=>{});}catch{}
+  try {Promise.resolve(document.modelContext.registerTool({name:'paint_sample_moment',description:'Record a watercolor reveal from the sample camera for a bounded duration. Does not access a physical camera or upload anything.',inputSchema:{type:'object',properties:{durationMs:{type:'number',minimum:300,maximum:12000}},required:['durationMs'],additionalProperties:false},annotations:{readOnlyHint:false},async execute(input){if(!input||!Number.isFinite(input.durationMs)||input.durationMs<300||input.durationMs>12000)throw new Error('Duration must be between 300 and 12000 ms.');if(sourceType!=='sample'||!ready||session.state!=='ready')throw new Error('The sample camera must be ready.');const reviewed=new Promise(resolve=>reviewWaiters.push(resolve));begin();await new Promise(resolve=>setTimeout(resolve,input.durationMs));release();await reviewed;return {state:session.state,durationMs:session.duration,format:recordedBlob?.type||'image/png',recordedBytes:recordedBlob?.size||0,simulationSteps:engine.steps};}})).catch(()=>{});}catch{}
 }
 sample();
