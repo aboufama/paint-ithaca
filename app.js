@@ -1,218 +1,228 @@
 import { Watercolor } from './watercolor.js';
-import { createCamera } from './camera.js';
+import { Brush } from './brush.js';
+import { HoldSession } from './hold-session.js';
 
-const $ = (id) => document.getElementById(id);
-const pin = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>';
-let photos = [], contributions = [], selectedPlace = 'all', selectedPhoto = null, capturedOriginal = null, isSampleCapture = false, paused = matchMedia('(prefers-reduced-motion: reduce)').matches, painted = true, engine, sourceVersion = 0;
-let database;
-const imageCache = new Map();
-const toast = (message) => { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').hidden = true, 4000); };
-const text = (tag, content, className) => { const el = document.createElement(tag); el.textContent = content; if (className) el.className = className; return el; };
+const $ = id => document.getElementById(id);
+const canvas = $('painting'), video = $('source-video'), hold = $('hold-button');
+const source = document.createElement('canvas'); source.width = 640; source.height = 800;
+const sourceContext = source.getContext('2d', { alpha: false });
+const brush = new Brush(640, 800);
+const motionCanvas = document.createElement('canvas'); motionCanvas.width = 32; motionCanvas.height = 40;
+const motionContext = motionCanvas.getContext('2d', { willReadFrequently: true });
+let previousPixels, motion = { x: 0, y: 0 }, stream, sampleImage, facing = 'environment', mirrored = false;
+let sourceType = 'sample', ready = false, generation = 0, raf = 0, lastFrame = 0, settleTimer;
+let recorder, recordingStream, recordedBlob, chunks = [], downloadUrl, canFlip = false;
+let engine;
+const reviewWaiters = [];
 
-function openDialog(id) { $(id).showModal(); }
-document.querySelectorAll('[data-dialog]').forEach(button => button.addEventListener('click', () => openDialog(button.dataset.dialog)));
-document.querySelectorAll('dialog').forEach(dialog => {
-  dialog.querySelector('.dialog-close')?.addEventListener('click', () => dialog.close());
-  dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); } });
+function state(value) { $('studio').dataset.state = value; }
+function message(content) { $('message-text').textContent = content; $('camera-message').hidden = !content; }
+function stopTracks() { stream?.getTracks().forEach(track => track.stop()); stream = null; }
+function closeRecordingStream() { recordingStream?.getTracks().forEach(track => track.stop()); recordingStream = null; }
+function schedule() { if (!raf) raf = requestAnimationFrame(frame); }
+
+const session = new HoldSession({
+  maxDuration: 12000,
+  onStart() {
+    state('holding'); $('instruction').textContent = 'Let the color find its way.';
+    $('use-camera').disabled = true; $('flip-camera').disabled = true;
+    brush.clear(); engine.clear(); engine.updateCoverage(brush.canvas); engine.setRecording(true); engine.setPaused(false);
+    recordedBlob = null; chunks = []; beginRecorder(); schedule();
+  },
+  onFinish() {
+    engine.setRecording(false); state('settling'); hold.disabled = true;
+    $('instruction').textContent = 'A moment to settle.';
+    settleTimer = setTimeout(finalize, 550); schedule();
+  },
+  onReset() { resetPainting(); }
 });
 
-async function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('paint-ithaca-demo', 1);
-    request.onupgradeneeded = () => request.result.createObjectStore('photos', { keyPath: 'id' });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-async function dbAction(action, value) {
-  database ||= await openDatabase();
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction('photos', action === 'getAll' ? 'readonly' : 'readwrite');
-    const request = transaction.objectStore('photos')[action](...(value === undefined ? [] : [value]));
-    transaction.oncomplete = () => resolve(request.result);
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
-  });
-}
-function visiblePhotos() {
-  const items = photos.map(photo => contributions.filter(item => item.place === photo.place).at(-1) || photo);
-  const other = contributions.filter(item => !photos.some(photo => photo.place === item.place)).at(-1);
-  if (other) items[5] = other;
-  return items;
-}
-function setPlace(id) {
-  if (id !== 'all' && ![...photos, ...contributions].some(item => item.id === id || item.place === id)) throw new Error('Unknown place');
-  selectedPlace = id;
-  document.querySelectorAll('.place-filter').forEach(button => {
-    const active = button.dataset.place === id; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
-  });
-  document.querySelectorAll('.tile').forEach(tile => tile.classList.toggle('dimmed', id !== 'all' && tile.dataset.place !== id));
-  redrawPainting();
-}
-function renderFilters() {
-  const parent = $('place-filters'); parent.replaceChildren();
-  const places = [{ id: 'all', place: 'All of Ithaca', color: null }, ...photos];
-  if (contributions.some(item => item.place === 'Somewhere else in Ithaca')) places.push({ id: 'elsewhere', place: 'Somewhere else in Ithaca', color: '#c9c7b4' });
-  places.forEach((place, index) => {
-    const id = index ? place.place : 'all';
-    const button = text('button', '', 'place-filter'); button.dataset.place = id; button.setAttribute('aria-pressed', String(selectedPlace === id)); button.classList.toggle('active', selectedPlace === id);
-    const swatch = text('span', '', 'swatch' + (index === 0 ? ' all-swatch' : '')); if (place.color) swatch.style.background = place.color; swatch.setAttribute('aria-hidden', 'true');
-    button.append(swatch, text('span', place.place)); button.addEventListener('click', () => setPlace(id)); parent.append(button);
-  });
-}
-function showDetail(photo) {
-  $('detail-image').src = photo.image; $('detail-image').alt = photo.alt || photo.caption || photo.place;
-  $('detail-place').textContent = photo.place; $('detail-title').textContent = photo.title || 'Your little piece of Ithaca';
-  $('detail-caption').textContent = photo.caption || photo.alt;
-  const credit = $('detail-credit'); credit.replaceChildren();
-  if (photo.local) credit.textContent = photo.sample ? 'Sample camera capture · Cayuga Lake by Acurarri · CC BY-SA 4.0. Cropped and painted; saved only in this browser.' : 'Your photo · saved only in this browser. Not submitted to a server.';
-  else { credit.append(text('span', `Photo by ${photo.author} · `)); const a = text('a', photo.license); a.href = photo.sourcePage; a.target = '_blank'; a.rel = 'noreferrer'; credit.append(a, text('span', ' · cropped and painted for this demo.')); }
-  openDialog('detail-dialog');
-}
-function renderMosaic() {
-  $('mosaic').replaceChildren();
-  visiblePhotos().forEach(photo => {
-    const button = text('button', '', 'tile'); button.dataset.place = photo.place; button.setAttribute('aria-label', `Explore ${photo.place}: ${photo.title}`);
-    const img = new Image(); img.src = photo.image; img.alt = photo.alt || photo.place; img.draggable = false;
-    const label = text('span', '', 'tile-label'); label.innerHTML = pin; label.append(text('span', photo.place));
-    button.append(img, label); button.addEventListener('click', () => { if (!dragged) showDetail(photo); }); $('mosaic').append(button);
-  });
-  $('view-count').textContent = photos.length + contributions.length;
-  $('place-count').textContent = new Set([...photos, ...contributions].map(p => p.place)).size;
-  renderFilters(); renderLocal(); redrawPainting();
-}
-function renderLocal() {
-  $('local-section').hidden = contributions.length === 0; $('local-grid').replaceChildren();
-  contributions.toReversed().forEach(photo => {
-    const card = text('div', '', 'local-card'), button = text('button', ''); const img = new Image(); img.src = photo.image; img.alt = photo.caption || photo.place;
-    button.append(img, text('p', photo.place)); button.addEventListener('click', () => showDetail(photo));
-    const remove = text('button', 'Remove from this device', 'remove-photo'); remove.setAttribute('aria-label', `Remove contribution: ${photo.caption || photo.place}`);
-    remove.addEventListener('click', async () => { try { await dbAction('delete', photo.id); contributions = contributions.filter(p => p.id !== photo.id); selectedPlace = 'all'; renderMosaic(); toast('Your photo was removed from this device.'); } catch { toast('Couldn’t remove the photo. Please try again.'); } });
-    card.append(button, remove); $('local-grid').append(card);
-  });
-}
-async function loadImage(src) {
-  if (!imageCache.has(src)) imageCache.set(src, new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = src; }));
-  return imageCache.get(src);
-}
-async function redrawPainting() {
-  const version = ++sourceVersion;
-  if (!engine || !photos.length) return;
-  const items = visiblePhotos();
+function beginRecorder() {
+  recorder = null; closeRecordingStream();
+  if (!canvas.captureStream || typeof MediaRecorder === 'undefined') return;
+  const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+  if (!mime) return;
   try {
-    const images = await Promise.all(items.map(photo => loadImage(photo.image)));
-    if (version !== sourceVersion) return;
-    const rect = $('mosaic').getBoundingClientRect();
-    const source = document.createElement('canvas'); source.width = 1024; source.height = Math.round(1024 * rect.height / rect.width);
-    const ctx = source.getContext('2d'); ctx.fillStyle = '#fffdf7'; ctx.fillRect(0, 0, source.width, source.height);
-    [...$('mosaic').children].forEach((tile, i) => {
-      const r = tile.getBoundingClientRect(), x = (r.left - rect.left) / rect.width * source.width, y = (r.top - rect.top) / rect.height * source.height;
-      const w = r.width / rect.width * source.width, h = r.height / rect.height * source.height, image = images[i];
-      const scale = Math.max(w / image.width, h / image.height);
-      ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-      if (selectedPlace !== 'all' && items[i].place !== selectedPlace) ctx.globalAlpha = .15;
-      ctx.drawImage(image, x + (w - image.width * scale) / 2, y + (h - image.height * scale) / 2, image.width * scale, image.height * scale); ctx.restore();
-    });
-    engine.setSource(source); engine.setPaused(paused);
-  } catch { toast('A sample photo couldn’t load. Try refreshing the canvas.'); }
+    recordingStream = canvas.captureStream(24);
+    recorder = new MediaRecorder(recordingStream, { mimeType: mime, videoBitsPerSecond: 4000000 });
+    const currentRecorder = recorder; let failed = false;
+    recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+    recorder.onstop = () => {
+      if(failed || recorder !== currentRecorder) return;
+      recordedBlob = chunks.length ? new Blob(chunks, { type: mime }) : null;
+      closeRecordingStream(); showReview();
+    };
+    recorder.onerror = () => { failed = true; recorder = null; recordedBlob = null; chunks = []; closeRecordingStream(); session.finish(); if (session.state === 'settling') finalize(); };
+    recorder.start(250);
+  } catch { recorder = null; closeRecordingStream(); }
 }
-let dragged = false, pointerStart = null;
-const watercolorCanvas = document.createElement('canvas'); watercolorCanvas.id = 'watercolor'; watercolorCanvas.setAttribute('aria-hidden', 'true'); $('artboard').append(watercolorCanvas);
-try { engine = new Watercolor(watercolorCanvas); } catch (error) { console.warn('Watercolor unavailable:', error.message); painted = false; $('painted-view').disabled = true; $('painted-view').title = 'This browser does not support WebGL2 watercolor.'; toast('Watercolor needs WebGL2. You can still explore and contribute photos.'); }
-$('mosaic').addEventListener('pointerdown', event => { if (!painted) return; pointerStart = [event.clientX,event.clientY]; dragged = false; });
-window.addEventListener('pointerup', () => { pointerStart = null; setTimeout(() => dragged = false, 0); });
-$('mosaic').addEventListener('pointermove', event => {
-  if (!pointerStart || !painted) return;
-  if (Math.hypot(event.clientX - pointerStart[0], event.clientY - pointerStart[1]) > 5) dragged = true;
-  if (!dragged) return;
-  const r = $('mosaic').getBoundingClientRect(); engine?.splat((event.clientX-r.left)/r.width, 1-(event.clientY-r.top)/r.height);
-});
-new ResizeObserver(() => { clearTimeout(redrawPainting.timer); redrawPainting.timer = setTimeout(redrawPainting, 150); }).observe($('mosaic'));
-function setPainted(value) { painted = value && !!engine; $('painted-view').classList.toggle('selected', painted); $('painted-view').setAttribute('aria-pressed', painted); $('original-view').classList.toggle('selected', !painted); $('original-view').setAttribute('aria-pressed', !painted); watercolorCanvas.hidden = !painted; $('artboard').classList.toggle('painted', painted); $('wash').disabled = !painted; engine?.setVisible(painted); }
-$('painted-view').addEventListener('click', () => setPainted(true)); $('original-view').addEventListener('click', () => setPainted(false));
-$('wash').addEventListener('input', event => { $('wash-value').textContent = `${event.target.value}%`; engine?.setWater(Number(event.target.value)/100); });
-function updatePlayback() { $('artboard').classList.toggle('paused', paused); $('play-icon').textContent = paused ? '▷' : 'Ⅱ'; $('play-label').textContent = paused ? 'Painting paused' : 'A living painting'; $('play-toggle').setAttribute('aria-label', paused ? 'Play the moving mosaic' : 'Pause the moving mosaic'); engine?.setPaused(paused); }
-$('play-toggle').addEventListener('click', () => { paused = !paused; updatePlayback(); });
-const repaint = text('button', '↻ Repaint the canvas', 'text-button repaint-button'); repaint.id = 'repaint'; repaint.addEventListener('click', () => { setPainted(true); paused = false; engine?.replay(); updatePlayback(); }); document.querySelector('.wash-panel').append(repaint);
-
-function resetUpload() { selectedPhoto = null; capturedOriginal = null; isSampleCapture = false; document.querySelector('.consent span').textContent = 'This is my photo, and I’m happy for it to be part of the painting.'; $('upload-form').reset(); $('photo-preview').hidden = true; $('file-error').textContent = ''; $('submit-error').textContent = ''; $('upload-success').hidden = true; $('upload-form-panel').hidden = false; }
-const camera = createCamera({ onCapture({ dataUrl, originalImage, sample }) {
-  resetUpload(); selectedPhoto = dataUrl; capturedOriginal = originalImage; isSampleCapture = sample; $('photo-preview').src = dataUrl; $('photo-preview').hidden = false;
-  if(sample) { document.querySelector('.consent span').textContent = 'Add this sample to my device-only demo canvas.'; $('photo-place').value = 'Cayuga Lake'; $('photo-caption').value = 'Sample camera view'; }
-  $('upload-title').innerHTML = 'A little piece, <em>captured.</em>';
-  openDialog('upload-dialog');
-} });
-document.querySelectorAll('.open-camera').forEach(button => button.addEventListener('click', () => camera.open()));
-document.querySelectorAll('.add-photo').forEach(button => button.addEventListener('click', () => { camera.close(); resetUpload(); $('upload-title').innerHTML = 'What does <em>your Ithaca</em> look like?'; openDialog('upload-dialog'); }));
-async function preparePhoto(file) {
-  $('file-error').textContent = ''; selectedPhoto = null; capturedOriginal = null; isSampleCapture = false; document.querySelector('.consent span').textContent = 'This is my photo, and I’m happy for it to be part of the painting.'; $('photo-preview').hidden = true;
-  if (!file) return;
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { $('file-error').textContent = 'Choose a JPG, PNG, or WebP photo.'; return; }
-  if (file.size > 15 * 1024 * 1024) { $('file-error').textContent = 'That photo is a little large. Choose one under 15 MB.'; return; }
-  const button = $('submit-photo'); button.disabled = true;
+function finalize() {
+  if (session.state !== 'settling') return;
+  clearTimeout(settleTimer); engine.render(); engine.setPaused(true); cancelAnimationFrame(raf); raf = 0;
+  stopTracks();
+  if (recorder?.state === 'recording') { try { recorder.stop(); } catch { showReview(); } } else showReview();
+}
+function showReview() {
+  if (session.state !== 'settling') return;
+  session.complete(); state('review'); message('');
+  $('heading').textContent = 'A moment, in color.';
+  $('instruction').textContent = 'Yours to keep.';
+  $('again').hidden = false; $('save').hidden = false; $('flip-camera').hidden = true;
+  $('save-label').textContent = recordedBlob ? 'Save film' : 'Save image';
+  $('use-camera').disabled = false;
+  reviewWaiters.splice(0).forEach(resolve => resolve());
+}
+function resetPainting() {
+  recordedBlob = null; chunks = []; URL.revokeObjectURL(downloadUrl); downloadUrl = null;
+  brush.clear(); previousPixels = null; motion = { x: 0, y: 0 };
+  engine?.setRecording(false); engine?.updateCoverage(brush.canvas); engine?.clear(); engine?.setPaused(true);
+  $('heading').textContent = 'Hold a moment.'; $('instruction').textContent = 'Hold to paint. Release to keep.';
+  $('elapsed').textContent = '00:00'; $('studio').style.setProperty('--progress', 0);
+  $('again').hidden = true; $('save').hidden = true; $('flip-camera').hidden = !canFlip || sourceType !== 'camera';
+  $('flip-camera').disabled = false; $('use-camera').disabled = false;
+  hold.disabled = !ready; state(ready ? 'ready' : 'loading'); schedule();
+}
+function cropIntoSource(image) {
+  const width = image.videoWidth || image.width, height = image.videoHeight || image.height;
+  if (!width || !height) return;
+  const sw = Math.min(width, height * .8), sh = sw / .8;
+  const sway = sourceType === 'sample' ? Math.sin(performance.now() / 5300) * Math.max(0, (width-sw)*.08) : 0;
+  sourceContext.save();
+  if (mirrored) { sourceContext.translate(640, 0); sourceContext.scale(-1, 1); }
+  sourceContext.drawImage(image, (width-sw)/2+sway, (height-sh)/2, sw, sh, 0, 0, 640, 800);
+  sourceContext.restore();
+}
+function estimateMotion() {
+  motionContext.drawImage(source, 0, 0, 32, 40);
+  const pixels = motionContext.getImageData(0,0,32,40).data;
+  if (previousPixels) {
+    let best = Infinity, bx = 0, by = 0;
+    for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) {
+      let difference=0;
+      for(let y=3;y<37;y+=2) for(let x=3;x<29;x+=2) difference+=Math.abs(pixels[(y*32+x)*4+1]-previousPixels[((y+dy)*32+x+dx)*4+1]);
+      // Prefer no movement in flat scenes rather than arbitrary tied shifts.
+      difference += (Math.abs(dx)+Math.abs(dy))*.5;
+      if(difference<best){best=difference;bx=dx;by=dy;}
+    }
+    motion.x=motion.x*.8+bx*.1; motion.y=motion.y*.8+by*.1;
+  }
+  previousPixels=pixels;
+}
+function frame(now) {
+  raf = 0;
+  if (!ready || document.hidden || session.state === 'review') return;
+  if (session.state !== 'settling' && now-lastFrame > 55) {
+    cropIntoSource(sourceType === 'sample' ? sampleImage : video);
+    engine.updateLiveSource(source);
+    if (session.state === 'ready') engine.render();
+    if (session.state === 'holding') {
+      estimateMotion(); const elapsed = session.tick();
+      if (session.state === 'holding') { brush.paint(elapsed,motion); engine.updateCoverage(brush.canvas); }
+      $('elapsed').textContent = `00:${String(Math.floor(elapsed/1000)).padStart(2,'0')}`;
+      $('studio').style.setProperty('--progress', elapsed/session.maxDuration);
+    }
+    lastFrame = now;
+  }
+  schedule();
+}
+async function initializeSource() {
+  cropIntoSource(sourceType === 'sample' ? sampleImage : video);
   try {
-    const bitmap = await createImageBitmap(file); if (!bitmap.width || !bitmap.height) throw new Error('Empty image');
-    const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fffdf7'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
-    selectedPhoto = canvas.toDataURL('image/jpeg', .85); $('photo-preview').src = selectedPhoto; $('photo-preview').hidden = false;
-  } catch { $('file-error').textContent = 'We couldn’t open that photo. Try another JPG or PNG.'; } finally { button.disabled = false; }
+    engine ||= new Watercolor(canvas); engine.setLiveSource(source); engine.updateCoverage(brush.canvas); engine.setWater(.64);
+  } catch (error) {
+    console.warn('Watercolor renderer unavailable:', error.message);
+    stopTracks(); ready = false; hold.disabled = true; message('This camera needs a browser with WebGL2. Try Safari, Chrome, or Edge.'); return;
+  }
+  ready = true; message('');
+  if (!session.reset()) resetPainting();
+  $('source-label').textContent = sourceType === 'sample' ? 'CAYUGA LAKE · SAMPLE' : 'ITHACA · YOUR CAMERA';
+  $('photo-credit').hidden = sourceType !== 'sample'; $('private-note').hidden = sourceType === 'sample';
+  $('camera-label').textContent = sourceType === 'sample' ? 'Use my camera' : 'My camera';
 }
-$('photo-input').addEventListener('change', event => preparePhoto(event.target.files[0]));
-['dragenter','dragover'].forEach(name => $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.add('dragging'); }));
-['dragleave','drop'].forEach(name => $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.remove('dragging'); if(name === 'drop') preparePhoto(event.dataTransfer.files[0]); }));
-$('upload-form').addEventListener('submit', async event => {
-  event.preventDefault(); $('submit-error').textContent = '';
-  if (!selectedPhoto) { $('file-error').textContent = 'Choose a photo first.'; $('photo-input').focus(); return; }
-  if (!$('upload-form').reportValidity()) return;
-  const button = $('submit-photo'); button.disabled = true; button.textContent = 'Adding your little piece…';
-  const photo = { id: crypto.randomUUID(), image: selectedPhoto, place: $('photo-place').value, caption: $('photo-caption').value.trim(), title: 'Your little piece of Ithaca', local: true, sample: isSampleCapture, originalImage: capturedOriginal, createdAt: new Date().toISOString() };
+async function sample() {
+  const token=++generation; stopTracks(); ready=false; sourceType='sample'; mirrored=false; canFlip=false; hold.disabled=true;
   try {
-    await dbAction('put', photo); contributions.push(photo); selectedPlace = 'all'; renderMosaic(); $('success-photo').src = selectedPhoto;
-    $('upload-form-panel').hidden = true; $('upload-success').hidden = false; $('upload-dialog').scrollTop = 0; $('back-to-canvas').focus();
-  } catch { $('submit-error').textContent = 'Your browser couldn’t save this photo. Storage may be full or disabled. Try a smaller photo or another browser.'; }
-  finally { button.disabled = false; button.textContent = 'Add my little piece ↗'; }
-});
-$('back-to-canvas').addEventListener('click', () => { $('upload-dialog').close(); $('canvas').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); });
-$('add-another').addEventListener('click', () => { resetUpload(); $('photo-input').focus(); });
-
-let filmStream, filmRecorder, filmUrl;
-$('watch-film').addEventListener('click', () => {
-  if (!engine || !watercolorCanvas.captureStream) { toast('Live film preview needs a browser with canvas video support.'); return; }
-  openDialog('film-dialog'); filmStream?.getTracks().forEach(track => track.stop()); filmStream = watercolorCanvas.captureStream(24); $('daily-film').srcObject = filmStream; $('daily-film').muted = true; $('daily-film').play().catch(() => {});
-  engine.setPaused(false); engine.setVisible(true); engine.replay();
-  $('film-description').textContent = 'Live frontend preview: your current canvas coming to life in watercolor. The completed daily film will come from your existing backend.';
-});
-$('film-dialog').addEventListener('close', () => { filmStream?.getTracks().forEach(track => track.stop()); $('daily-film').srcObject = null; if (filmRecorder?.state === 'recording') filmRecorder.stop(); engine?.setPaused(paused); engine?.setVisible(painted); });
-$('download-film').addEventListener('click', event => {
-  event.preventDefault();
-  if (!filmStream || typeof MediaRecorder === 'undefined') { toast('Recording is not supported in this browser.'); return; }
-  if (filmRecorder?.state === 'recording') return;
-  const type = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/mp4'].find(mime => MediaRecorder.isTypeSupported(mime));
-  if (!type) { toast('Your browser can preview this film but cannot export it.'); return; }
-  const chunks = []; filmRecorder = new MediaRecorder(filmStream, { mimeType: type });
-  filmRecorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
-  filmRecorder.onstop = () => { URL.revokeObjectURL(filmUrl); filmUrl = URL.createObjectURL(new Blob(chunks, { type })); const a = document.createElement('a'); a.href = filmUrl; a.download = `paint-ithaca-preview.${type.includes('mp4') ? 'mp4' : 'webm'}`; a.click(); $('download-film').textContent = 'Save an 8-second preview ↓'; };
-  filmRecorder.onerror = () => { $('download-film').textContent = 'Save an 8-second preview ↓'; toast('The recording could not be completed.'); };
-  engine.replay(); filmRecorder.start(); $('download-film').textContent = 'Recording your painting…'; setTimeout(() => { if (filmRecorder?.state === 'recording') filmRecorder.stop(); }, 8000);
-});
-
-async function init() {
+    if(!sampleImage){sampleImage=new Image();sampleImage.src='assets/cayuga-lake.jpg';await sampleImage.decode();}
+    if(token!==generation)return;
+    await initializeSource();
+  } catch { message('The sample couldn’t load. Try your camera.'); }
+}
+async function camera() {
+  if(session.state==='holding'||session.state==='settling')return;
+  const token=++generation; ready=false; hold.disabled=true; stopTracks();
+  state('loading'); message('Allow your camera. Find your little corner.');
+  if(!navigator.mediaDevices?.getUserMedia){message('Camera access isn’t available here. Open the demo in a secure browser.');return;}
   try {
-    const response = await fetch('./data/edition.json'); if (!response.ok) throw new Error('Edition unavailable'); const edition = await response.json(); photos = edition.photos;
-    $('edition-title').textContent = edition.title;
-    try { contributions = await dbAction('getAll'); } catch { toast('Device storage is unavailable. Photos can be explored, but contributions cannot be saved.'); }
-    [...photos.map(photo => photo.place), 'Somewhere else in Ithaca'].forEach(place => { const option = text('option', place); option.value = place; $('photo-place').append(option); });
-    photos.forEach(photo => { const row = text('div', '', 'credit-row'); const source = text('a', photo.place); source.href = photo.sourcePage; source.target = '_blank'; source.rel = 'noreferrer'; const license = text('a', photo.license); license.href = photo.licenseUrl; license.target = '_blank'; license.rel = 'noreferrer'; row.append(source, text('br',''), text('span', `${photo.author} · `), license); $('credit-list').append(row); });
-    renderMosaic(); setPainted(painted); updatePlayback();
-  } catch { $('board-empty').hidden = false; $('board-empty').textContent = 'The canvas couldn’t load. Please refresh to try again.'; $('mosaic').hidden = true; watercolorCanvas.hidden = true; }
+    const next=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:1600},frameRate:{ideal:24,max:30}}});
+    if(token!==generation){next.getTracks().forEach(track=>track.stop());return;}
+    stream=next;video.srcObject=stream;await video.play();
+    if(token!==generation){next.getTracks().forEach(track=>track.stop());return;}
+    if(!video.videoWidth||!video.videoHeight)throw new Error('Camera has no frame');
+    sourceType='camera';mirrored=stream.getVideoTracks()[0].getSettings().facingMode==='user';
+    stream.getVideoTracks()[0].addEventListener('ended',()=>{
+      if(!ready)return;session.finish();if(session.state==='settling')finalize();ready=false;hold.disabled=true;
+      if(session.state!=='review')message('Your camera disconnected. Try it again or use the sample.');
+    },{once:true});
+    const devices=await navigator.mediaDevices.enumerateDevices();
+    if(token!==generation)return;
+    canFlip=devices.filter(device=>device.kind==='videoinput').length>1;
+    await initializeSource();
+  } catch(error) {
+    if(token!==generation)return;stopTracks();
+    const copy={NotAllowedError:'Camera access is off. Allow it in your browser, or try the sample.',NotFoundError:'No camera found. Try this on your phone, or use the sample.',NotReadableError:'Your camera is busy. Close other camera apps and try again.'};
+    message(copy[error.name]||'The camera couldn’t start. Try again, or use the sample.');
+  }
 }
-init();
 
-if (document.modelContext?.registerTool) {
-  const lifecycle = new AbortController();
-  const register = tool => { try { Promise.resolve(document.modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {} };
-  register({ name: 'filter_canvas_by_place', description: 'Filter the visible Paint Ithaca canvas. Use all or an exact displayed place name.', inputSchema: { type: 'object', properties: { place: { type: 'string' } }, required: ['place'], additionalProperties: false }, annotations: { readOnlyHint: false }, execute(input) { if (!input || typeof input.place !== 'string') throw new Error('A place is required.'); setPlace(input.place); return { place: selectedPlace }; } });
-  register({ name: 'open_interactive_camera', description: 'Open the interactive watercolor camera viewfinder. Camera permission is requested only when Enable camera is pressed.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false }, execute() { camera.open(); return { cameraDialogOpen: true, cameraAccessRequested: false }; } });
-  register({ name: 'start_photo_contribution', description: 'Open the photo contribution form. Does not select, upload, or save a photo.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false }, execute() { resetUpload(); openDialog('upload-dialog'); return { formOpen: true, storage: 'device-only-demo' }; } });
-  window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
+let pointerId = null, keyHeld = false;
+function begin() { if(ready && !hold.disabled)session.begin(); }
+function release() { session.finish(); }
+hold.addEventListener('pointerdown',event=>{
+  if(!event.isPrimary||event.button!==0||pointerId!==null||hold.disabled)return;
+  event.preventDefault();pointerId=event.pointerId;hold.setPointerCapture(event.pointerId);begin();
+});
+hold.addEventListener('pointerup',event=>{if(event.pointerId!==pointerId)return;pointerId=null;release();});
+hold.addEventListener('pointercancel',()=>{pointerId=null;release();});
+hold.addEventListener('lostpointercapture',()=>{pointerId=null;release();});
+hold.addEventListener('contextmenu',event=>event.preventDefault());
+document.addEventListener('keydown',event=>{
+  if(event.repeat||!['Space','Enter'].includes(event.code))return;
+  const target=event.target;
+  if(event.code==='Enter'&&target!==hold)return;
+  if(event.code==='Space'&&target!==document.body&&target!==hold)return;
+  event.preventDefault();keyHeld=true;begin();
+});
+document.addEventListener('keyup',event=>{if(keyHeld&&['Space','Enter'].includes(event.code)){event.preventDefault();keyHeld=false;release();}});
+window.addEventListener('blur',()=>{keyHeld=false;pointerId=null;release();});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){++generation;release();if(session.state==='settling')finalize();stopTracks();engine?.setPaused(true);cancelAnimationFrame(raf);raf=0;if(sourceType==='camera'){ready=false;hold.disabled=true;}}
+  else if(session.state==='ready'){if(sourceType==='sample'){engine?.setPaused(false);schedule();}else{message('Your camera paused. Tap “Use my camera” to return.');$('camera-label').textContent='Use my camera';}}
+});
+$('again').addEventListener('click',()=>{session.reset();if(sourceType==='camera')camera();});
+$('use-camera').addEventListener('click',camera);$('try-sample').addEventListener('click',sample);
+$('flip-camera').addEventListener('click',()=>{facing=facing==='environment'?'user':'environment';camera();});
+$('save').addEventListener('click',async()=>{
+  if(session.state!=='review')return;
+  try {
+    const blob=recordedBlob||await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+    if(!blob)throw new Error('No painting available');
+    URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=downloadUrl;a.download=`paint-ithaca-${new Date().toISOString().slice(0,10)}.${blob.type.includes('mp4')?'mp4':blob.type.includes('webm')?'webm':'png'}`;a.click();
+  } catch { $('instruction').textContent='Couldn’t save that moment. Please try again.'; }
+});
+window.addEventListener('pagehide',event=>{
+  ++generation;release();if(session.state==='settling')finalize();
+  clearTimeout(settleTimer);stopTracks();closeRecordingStream();
+  engine?.setPaused(true);cancelAnimationFrame(raf);raf=0;
+  if(!event.persisted){engine?.dispose();URL.revokeObjectURL(downloadUrl);}
+});
+window.addEventListener('pageshow',event=>{
+  if(!event.persisted||session.state!=='ready')return;
+  if(sourceType==='sample'){ready=true;schedule();}
+  else{ready=false;hold.disabled=true;message('Tap “Use my camera” to return.');$('camera-label').textContent='Use my camera';}
+});
+// One structured entry point mirrors the one deliberate gesture. It never grants camera access.
+if(document.modelContext?.registerTool){
+  try {Promise.resolve(document.modelContext.registerTool({name:'paint_sample_moment',description:'Record a watercolor reveal from the sample camera for a bounded duration. Does not access a physical camera or upload anything.',inputSchema:{type:'object',properties:{durationMs:{type:'number',minimum:300,maximum:12000}},required:['durationMs'],additionalProperties:false},annotations:{readOnlyHint:false},async execute(input){if(!input||!Number.isFinite(input.durationMs)||input.durationMs<300||input.durationMs>12000)throw new Error('Duration must be between 300 and 12000 ms.');if(sourceType!=='sample'||!ready||session.state!=='ready')throw new Error('The sample camera must be ready.');const reviewed=new Promise(resolve=>reviewWaiters.push(resolve));begin();await new Promise(resolve=>setTimeout(resolve,input.durationMs));release();await reviewed;return {state:session.state,durationMs:session.duration,format:recordedBlob?.type||'image/png',recordedBytes:recordedBlob?.size||0};}})).catch(()=>{});}catch{}
 }
+sample();

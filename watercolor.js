@@ -14,6 +14,8 @@ in vec2 uv;
 uniform sampler2D mobile;
 uniform sampler2D settled;
 uniform sampler2D photograph;
+uniform sampler2D coverage;
+uniform float recording;
 uniform vec2 pixel;
 uniform float water;
 uniform float time;
@@ -55,11 +57,11 @@ void main(){
    pigment+=deposit*(.83+grain*.34);
    wet+=smoothstep(.005,.04,density)*(.68+water*.42);
  }
- if(live>.5){
-   vec3 desired=ink(uv);
-   paper.rgb*=.92;
-   pigment=max(vec3(0),pigment+(desired-pigment-paper.rgb)*.09);
-   wet=max(wet,.6+water*.4);
+ if(live>.5 && recording>.5){
+   float mask=texture(coverage,uv).a;
+   vec3 desired=ink(uv)*mask*(.88+grain*.24);
+   pigment=max(vec3(0),pigment+(desired-pigment-paper.rgb)*.095);
+   wet=max(wet,mask*(.7+water*.3));
  }
  float radius=.04;vec2 d=(uv-brush.xy)/vec2(1.,pixel.y/pixel.x);
  float touch=brush.z*smoothstep(radius,0.,length(d));
@@ -86,6 +88,12 @@ void main(){
  vec3 paper=vec3(.995,.984,.956)*(1.-.04*grain-.018*fine);
  float damp=smoothstep(.02,.7,m.a);
  vec3 result=paper*reflectance;
+ // An almost-pencil live view remains on the unpainted paper for framing.
+ vec3 source=texture(photograph,uv).rgb;
+ float luma=dot(source,vec3(.299,.587,.114));
+ float nearby=dot(texture(photograph,uv+pixel*2.).rgb,vec3(.299,.587,.114));
+ float ghost=1.-smoothstep(.001,.025,dot(k,vec3(.333)));
+ result*=1.-ghost*(.13*(1.-luma)+min(.2,abs(luma-nearby)*.45));
  // Subtle relief follows the actual wet front, not a moving color overlay.
  float ridge=abs(texture(mobile,uv+pixel).a-texture(mobile,uv-pixel).a);
  result*=1.-min(.12,ridge*.13);
@@ -99,7 +107,7 @@ export class Watercolor {
     const gl = this.gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true, powerPreference: 'low-power' });
     if (!gl || !gl.getExtension('EXT_color_buffer_float')) throw new Error('WebGL2 float color buffers are required');
     this.stepProgram = this.program(STEP); this.renderProgram = this.program(RENDER);
-    this.sourceTexture = this.texture(1, 1, false);
+    this.sourceTexture = this.texture(1, 1, false); this.coverageTexture = this.texture(1, 1, false); this.recording = false;
     this.width = 0; this.height = 0; this.time = 0; this.water = .4; this.brush = [-10,-10,0]; this.paused = false; this.visible = true; this.raf = 0; this.hasSource = false; this.live = false;
     this.onVisibility = () => this.schedule(); document.addEventListener('visibilitychange', this.onVisibility);
     canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); cancelAnimationFrame(this.raf); this.raf = 0; canvas.hidden = true; });
@@ -110,7 +118,7 @@ export class Watercolor {
     const shader = (type, code) => { const s = gl.createShader(type); gl.shaderSource(s,code); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) { const message=gl.getShaderInfoLog(s); gl.deleteShader(s); throw new Error(message); } return s; };
     const vertex=shader(gl.VERTEX_SHADER,VERTEX),pixel=shader(gl.FRAGMENT_SHADER,fragment),p=gl.createProgram();gl.attachShader(p,vertex);gl.attachShader(p,pixel);gl.linkProgram(p);gl.deleteShader(vertex);gl.deleteShader(pixel);
     if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));
-    const uniforms = {}; ['mobile','settled','photograph','pixel','water','time','dt','brush','live'].forEach(name=>uniforms[name]=gl.getUniformLocation(p,name));
+    const uniforms = {}; ['mobile','settled','photograph','pixel','water','time','dt','brush','live','coverage','recording'].forEach(name=>uniforms[name]=gl.getUniformLocation(p,name));
     return { program:p, uniforms };
   }
   texture(width,height,float=true) {
@@ -141,10 +149,15 @@ export class Watercolor {
   updateLiveSource(source) {
     const gl=this.gl;gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,this.sourceTexture);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);this.schedule();
   }
+  updateCoverage(source) {
+    const gl=this.gl;gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,this.coverageTexture);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+  }
+  setRecording(value) { this.recording=value; this.schedule(); }
+  clear() { this.replay(true); }
   bind(spec) {
     const gl=this.gl,u=spec.uniforms;gl.useProgram(spec.program);
-    [this.targets[0].mobile,this.targets[0].settled,this.sourceTexture].forEach((texture,index)=>{gl.activeTexture(gl.TEXTURE0+index);gl.bindTexture(gl.TEXTURE_2D,texture);});
-    gl.uniform1i(u.mobile,0);gl.uniform1i(u.settled,1);gl.uniform1i(u.photograph,2);gl.uniform2f(u.pixel,1/this.width,1/this.height);gl.uniform1f(u.water,this.water);gl.uniform1f(u.time,this.time);gl.uniform1f(u.dt,1/60);gl.uniform1f(u.live,this.live?1:0);gl.uniform3fv(u.brush,this.brush);
+    [this.targets[0].mobile,this.targets[0].settled,this.sourceTexture,this.coverageTexture].forEach((texture,index)=>{gl.activeTexture(gl.TEXTURE0+index);gl.bindTexture(gl.TEXTURE_2D,texture);});
+    gl.uniform1i(u.mobile,0);gl.uniform1i(u.settled,1);gl.uniform1i(u.photograph,2);gl.uniform1i(u.coverage,3);gl.uniform1f(u.recording,this.recording?1:0);gl.uniform2f(u.pixel,1/this.width,1/this.height);gl.uniform1f(u.water,this.water);gl.uniform1f(u.time,this.time);gl.uniform1f(u.dt,1/60);gl.uniform1f(u.live,this.live?1:0);gl.uniform3fv(u.brush,this.brush);
   }
   step() {
     const gl=this.gl;this.time+=1/60;this.bind(this.stepProgram);gl.bindFramebuffer(gl.FRAMEBUFFER,this.targets[1].fbo);gl.viewport(0,0,this.width,this.height);gl.drawArrays(gl.TRIANGLES,0,3);this.targets.reverse();this.brush[2]*=.7;
@@ -156,7 +169,7 @@ export class Watercolor {
     if(!this.hasSource)return;const gl=this.gl;this.time=0;this.brush=[-10,-10,0];
     for(const target of this.targets){gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);}
     // Always show an initial recognizable painting, also in reduced-motion mode.
-    for(let i=0;i<(reveal ? 3 : 145);i++)this.step();
+    for(let i=0;i<(this.live ? 1 : reveal ? 3 : 145);i++)this.step();
     if(this.paused)for(let i=0;i<140;i++)this.step();
     this.render();this.schedule();
   }
@@ -168,5 +181,5 @@ export class Watercolor {
   setWater(value){this.water=value;this.time=Math.min(this.time,10);this.schedule();}
   setPaused(value){this.paused=value;if(value){cancelAnimationFrame(this.raf);this.raf=0;}else this.schedule();}
   setVisible(value){this.visible=value;if(!value){cancelAnimationFrame(this.raf);this.raf=0;}else this.schedule();}
-  dispose(){cancelAnimationFrame(this.raf);document.removeEventListener('visibilitychange',this.onVisibility);for(const target of this.targets||[]){this.gl.deleteTexture(target.mobile);this.gl.deleteTexture(target.settled);this.gl.deleteFramebuffer(target.fbo);}this.gl.deleteTexture(this.sourceTexture);this.gl.deleteProgram(this.stepProgram.program);this.gl.deleteProgram(this.renderProgram.program);}
+  dispose(){cancelAnimationFrame(this.raf);document.removeEventListener('visibilitychange',this.onVisibility);for(const target of this.targets||[]){this.gl.deleteTexture(target.mobile);this.gl.deleteTexture(target.settled);this.gl.deleteFramebuffer(target.fbo);}this.gl.deleteTexture(this.sourceTexture);this.gl.deleteTexture(this.coverageTexture);this.gl.deleteProgram(this.stepProgram.program);this.gl.deleteProgram(this.renderProgram.program);}
 }
