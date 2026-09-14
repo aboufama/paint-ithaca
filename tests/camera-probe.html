@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=capture-2"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=controls-3"></head><body>
 <script type="module">
 import TidalBloom from '../tidal-bloom.js?v=capture-2';
 import { SubmissionScene } from '../submission-scene.js?v=submit-2';
@@ -11,6 +11,7 @@ let feedTimer;
 let requests = 0, cameraStream, snapshotCount = 0, previewFrames = 0, snapshotPixels, snapshotCanvas, requestOptions;
 let scenePreparations = 0, sceneFinals = 0, mosaicImages = 0, mosaicTiles = 0, submissionStartPixels, exactSubmissionStart = false;
 const rendererPreparations=[];
+let previousButtonBloom,previousButtonPress;
 const originalCreateAsync=TidalBloom.createAsync;
 TidalBloom.createAsync=async function(...args) {
   const metric={frames:0,started:performance.now(),completed:false};rendererPreparations.push(metric);
@@ -54,7 +55,7 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=capture-2');
+await import('../app.js?v=controls-3');
 function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
@@ -73,7 +74,7 @@ async function waitForFlipReady() {
     assert(performance.now()<deadline,'Two-camera enumeration did not make Flip available');
     await new Promise(requestAnimationFrame);
   }
-  await Promise.all(document.querySelector('.capture-controls').getAnimations().map(animation=>animation.finished.catch(()=>{})));
+  await Promise.all(document.querySelector('.capture-controls').getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{})));
 }
 function assertSnapshotOn(canvas,label) {
   assert(canvas.width===snapshotPixels.width&&canvas.height===snapshotPixels.height,`${label} dimensions differ from the frozen photo`);
@@ -81,7 +82,10 @@ function assertSnapshotOn(canvas,label) {
   assert(pixels.every((value,index)=>value===snapshotPixels.data[index]),`${label} must show the exact unmodified frozen photo`);
 }
 function captureBounds() {
-  return Object.fromEntries(['viewfinder','shutter','flip-camera'].map(id=>[id,document.getElementById(id).getBoundingClientRect()]));
+  return Object.fromEntries(['viewfinder','shutter','flip-camera'].map(id=>{
+    const element=document.getElementById(id),rect=element.getBoundingClientRect();
+    return [id,{centerX:rect.x+rect.width/2,centerY:rect.y+rect.height/2,width:element.offsetWidth,height:element.offsetHeight}];
+  }));
 }
 function assertCaptureControls(bounds,allowFade=false) {
   const shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
@@ -89,10 +93,38 @@ function assertCaptureControls(bounds,allowFade=false) {
   assert(getComputedStyle(document.querySelector('.capture-controls')).display==='grid','Capture must retain the same controls grid');
   if(!allowFade)assertPaintingShutter();
   assert(document.getElementById('again').hidden&&document.getElementById('submit').hidden,'Review actions must wait for the coordinated transition');
+  const current=captureBounds();
   for(const [id,before] of Object.entries(bounds)) {
-    const after=document.getElementById(id).getBoundingClientRect();
-    for(const key of ['x','y','width','height'])assert(Math.abs(after[key]-before[key])<=1,`${id} ${key} moved while retaining capture controls`);
+    for(const key of ['centerX','centerY','width','height'])assert(Math.abs(current[id][key]-before[key])<=1,`${id} layout ${key} moved while retaining capture controls`);
   }
+}
+function effectiveOpacity(element) {
+  let opacity=1;
+  for(let current=element;current instanceof Element;current=current.parentElement) {
+    const style=getComputedStyle(current);
+    if(style.display==='none'||style.visibility==='hidden')return 0;
+    opacity*=Number(style.opacity);
+  }
+  return opacity;
+}
+function opacityAnimation(element) {
+  return element.getAnimations().find(animation=>animation.effect?.target===element
+    &&animation.effect.getKeyframes().some(frame=>frame.opacity!==undefined));
+}
+async function assertControlEntrance(elements,label,duration) {
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return {reducedMotion:true};
+  const animations=elements.map(element=>{
+    const animation=opacityAnimation(element);
+    assert(animation,`${label} must animate each new item individually`);
+    const frames=animation.effect.getKeyframes();
+    assert(Number(frames[0].opacity)<=.01&&Number(frames.at(-1).opacity)>=.99,`${label} must fade from transparent to visible`);
+    assert(Math.abs(Number(animation.effect.getTiming().duration)-duration)<=1,`${label} entrance should last ${duration}ms`);
+    assert(effectiveOpacity(element)<.2,`${label} should begin visibly transparent`);
+    return animation;
+  });
+  await Promise.all(animations.map(animation=>animation.finished));
+  elements.forEach(element=>assert(effectiveOpacity(element)>.99,`${label} must finish fully visible`));
+  return {items:elements.length,durationMs:duration};
 }
 async function verifyCrossfadeVisibilityPause(animation) {
   const hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');
@@ -115,17 +147,38 @@ async function captureThroughReview(expectedSnapshots) {
   await waitForFlipReady();
   const studio=document.getElementById('studio'),shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
   const canvas=document.getElementById('painting'),preview=document.getElementById('camera-preview');
+  const buttonBloom=shutter.querySelector('.button-bloom');
+  assert(buttonBloom&&Number(getComputedStyle(buttonBloom).opacity)<.01,'Ready camera must reset the internal button bloom to transparent');
   const bounds=captureBounds(),priorRequests=requests,priorPreparations=rendererPreparations.length;
-  const states=[],paintingOpacities=[];
+  const states=[],paintingOpacities=[],bloomProgress=[],exitSamples=[];
+  let bloomAnimation,pressAnimation,bloomStartTime,reviewingStarted,reviewStarted,exitAnimations;
   let failure=null,frameId=0,paintingFrames=0,preparingFrames=0,firstPaintingCheck=false,pauseCheck,visibilityPauseVerified=false;
   const inspect=()=>{
     try {
       const value=studio.dataset.state;
       if(states.at(-1)!==value)states.push(value);
+      if(bloomAnimation) {
+        const progress=bloomAnimation.effect.getComputedTiming().progress;
+        if(progress!==null)bloomProgress.push(progress);
+      }
       if(['preparing','painting','reviewing'].includes(value)) {
         assertCaptureControls(bounds,value==='reviewing');
         assert(snapshotCount===expectedSnapshots&&requests===priorRequests,'Preparation or animation reopened or recaptured the camera');
       }
+      if(value==='reviewing') {
+        if(reviewingStarted===undefined) {
+          reviewingStarted=performance.now();
+          exitAnimations=[opacityAnimation(shutter),opacityAnimation(flip)];
+          assert(exitAnimations.every(Boolean),'Camera and Flip must each have their own exit animation');
+          exitAnimations.forEach(animation=>assert(Math.abs(Number(animation.effect.getTiming().duration)-300)<=1,'Each capture control should fade out over 300ms'));
+        }
+        const sample={timeMs:performance.now()-reviewingStarted,camera:effectiveOpacity(shutter),flip:effectiveOpacity(flip)};
+        const prior=exitSamples.at(-1);
+        assert(Math.abs(sample.camera-sample.flip)<.08,'Camera and Flip must fade together at matching effective opacity');
+        if(prior)assert(sample.camera<=prior.camera+.025&&sample.flip<=prior.flip+.025,'Capture controls must not flash back brighter during their exit');
+        exitSamples.push(sample);
+      }
+      if(value==='review'&&reviewStarted===undefined)reviewStarted=performance.now();
       if(value==='painting') {
         const opacity=Number(getComputedStyle(canvas).opacity);paintingOpacities.push(opacity);
         assert(Number(getComputedStyle(preview).opacity)>.99,'Frozen photo must remain visible beneath the incoming watercolor');
@@ -147,16 +200,28 @@ async function captureThroughReview(expectedSnapshots) {
     if(!['review','error'].includes(studio.dataset.state))frameId=requestAnimationFrame(tick);
   };
   frameId=requestAnimationFrame(tick);
-  let clickReturnMs;
+  let clickReturnMs,reviewEntrance;
   try {
     const started=performance.now();shutter.click();shutter.click();clickReturnMs=performance.now()-started;
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(!reduced) {
+      bloomAnimation=opacityAnimation(buttonBloom);
+      pressAnimation=shutter.getAnimations().find(animation=>animation.effect?.target===shutter
+        &&animation.effect.getKeyframes().some(frame=>frame.transform!==undefined||frame.scale!==undefined));
+      assert(bloomAnimation&&bloomAnimation!==previousButtonBloom,'Each capture must create a fresh internal button bloom animation');
+      assert(pressAnimation&&pressAnimation!==previousButtonPress,'Each capture must create an actual fresh camera press animation');
+      bloomStartTime=Number(bloomAnimation.currentTime||0);
+      assert(bloomStartTime<=34,'Replayed button bloom must begin near time zero');
+      assert(bloomAnimation.playState==='running'&&pressAnimation.playState==='running','The bloom and press animations must actually start running');
+      previousButtonBloom=bloomAnimation;previousButtonPress=pressAnimation;
+    }
     assert(clickReturnMs<200,`Shutter blocked the interface for ${clickReturnMs.toFixed(1)}ms`);
     assert(studio.dataset.state==='preparing','Capture must return immediately in the asynchronous preparing state');
     assert(snapshotCount===expectedSnapshots,'Double capture must copy one immutable camera frame');
     assertSnapshotOn(canvas,'Initial painting surface');assertSnapshotOn(preview,'Initial frozen preview');
     assert(Number(getComputedStyle(canvas).opacity)>0||Number(getComputedStyle(preview).opacity)>0,'The captured photograph must remain visible during preparation');
     assertCaptureControls(bounds);
-    assert(shutter.classList.contains('is-blooming')&&shutter.querySelector('.button-bloom'),'Camera button must start its internal bloom on capture');
+    assert(buttonBloom,'Camera button must contain its internal bloom surface');
     assert(['hidden','clip'].includes(getComputedStyle(shutter).overflow),'The button bloom must be clipped inside the camera button');
     const icon=shutter.querySelector('svg');
     assert(shutter.getAttribute('aria-label')==='Painting photo'&&icon&&getComputedStyle(icon).display!=='none'&&Number(getComputedStyle(icon).opacity)>0,'Camera button must keep its Painting photo label and visible camera icon');
@@ -164,6 +229,7 @@ async function captureThroughReview(expectedSnapshots) {
     assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop immediately after capture');
     clearInterval(feedTimer);context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000);
     inspect();await waitForState('review');if(pauseCheck)await pauseCheck;inspect();
+    reviewEntrance=await assertControlEntrance([document.getElementById('again'),document.getElementById('submit')],'Review actions',180);
   } finally {observer.disconnect();cancelAnimationFrame(frameId);}
   if(failure)throw failure;
   const preparation=rendererPreparations[priorPreparations];
@@ -175,8 +241,18 @@ async function captureThroughReview(expectedSnapshots) {
   assert(states.includes('reviewing')||reduced,'Controls must pass through the coordinated reviewing fade');
   assert(reduced||paintingOpacities.some(opacity=>opacity>0&&opacity<1),'Watercolor must crossfade over the frozen photograph');
   assert(reduced||visibilityPauseVerified,'Capture must verify mid-crossfade page hiding and resuming');
+  if(!reduced) {
+    assert(bloomProgress.some(progress=>progress>.1&&progress<.9),'Button bloom must visibly progress through intermediate frames');
+    const bloomDuration=Number(bloomAnimation.effect.getTiming().duration);
+    assert(bloomAnimation.playState==='finished'&&Number(bloomAnimation.currentTime)>=bloomDuration,'Button bloom must reach its completed frame before review');
+    const midSamples=exitSamples.filter(sample=>sample.camera>.08&&sample.camera<.92&&sample.flip>.08&&sample.flip<.92);
+    assert(midSamples.length>=3&&new Set(midSamples.map(sample=>sample.camera.toFixed(2))).size>=3,'Capture controls need multiple distinct mid-opacity frames rather than a flash');
+    assert(exitSamples[0].camera>.9&&exitSamples[0].flip>.9,'Capture control exit must begin fully visible');
+    assert(exitSamples.at(-1).camera<.12&&exitSamples.at(-1).flip<.12,'Capture controls must fade nearly transparent before being hidden');
+    assert(reviewStarted-reviewingStarted>=250,'Review actions must wait for the complete capture control fade');
+  }
   assert(shutter.hidden&&flip.hidden&&!document.getElementById('again').hidden&&!document.getElementById('submit').hidden,'Review must replace both capture controls with Retake and Submit');
-  return {clickReturnMs,preparationFrames:preparation.frames,preparationDurationMs:preparation.durationMs,preparingFrames,paintingFrames,transitionStates:states,exactFrozenFirstFrame:true,retainedCaptureControls:true,visibilityPauseVerified};
+  return {clickReturnMs,preparationFrames:preparation.frames,preparationDurationMs:preparation.durationMs,preparingFrames,paintingFrames,transitionStates:states,exactFrozenFirstFrame:true,retainedCaptureControls:true,visibilityPauseVerified,bloomReplayed:reduced?null:true,bloomStartTime,exitFadeMs:reviewStarted-reviewingStarted,exitSamples,reviewEntrance};
 }
 function assertFrozenSource() {
   assert(snapshotCanvas.width===snapshotPixels.width&&snapshotCanvas.height===snapshotPixels.height,'Frozen source dimensions changed after capture');
@@ -270,6 +346,7 @@ async function checkSubmit() {
   assert(document.getElementById('shutter').hidden,'No camera control should appear during submission');
   assert(studio.getAttribute('aria-busy')==='true','Submission must expose its busy state');
   await waitForState('submitted');
+  const submittedEntrance=await assertControlEntrance([document.getElementById('instruction'),document.getElementById('again')],'Submitted message and next capture',200);
   assert(scenePreparations===1&&sceneFinals===1,'Double Submit should render one complete collection animation');
   assert(exactSubmissionStart||matchMedia('(prefers-reduced-motion: reduce)').matches,'Submission must begin at the unchanged painting');
   assert(mosaicImages>=4&&mosaicTiles>=40,'Collection should contain many real, locally bundled images');
@@ -281,7 +358,7 @@ async function checkSubmit() {
   assert(document.getElementById('again-label').textContent==='Capture another','Completion should offer another capture');
   assert(!document.getElementById('again').hidden&&submit.hidden,'Completed view should expose only the next-capture action');
   assert(!studio.hasAttribute('aria-busy'),'Completed view must clear its busy state');
-  return {passed:true,cameraRequests:requests,snapshotCount,scenePreparations,sceneFinals,exactSubmissionStart,mosaicImages,mosaicTiles,localPreviewOnly:true,frozenSourceUnchanged:true,outcome:'The painting joined the collection once; no camera photo was uploaded.'};
+  return {passed:true,cameraRequests:requests,snapshotCount,scenePreparations,sceneFinals,exactSubmissionStart,mosaicImages,mosaicTiles,submittedEntrance,localPreviewOnly:true,frozenSourceUnchanged:true,outcome:'The painting joined the collection once; no camera photo was uploaded.'};
 }
 async function checkAfterSubmit() {
   const studio=document.getElementById('studio');

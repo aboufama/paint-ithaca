@@ -4,7 +4,7 @@ import { SubmissionScene } from './submission-scene.js?v=submit-2';
 
 const $ = id => document.getElementById(id);
 const video = $('source-video'), preview = $('camera-preview'), canvas = $('painting'), shutter = $('shutter');
-const flip = $('flip-camera'), controls = shutter.parentElement;
+const flip = $('flip-camera'), buttonBloom = shutter.querySelector('.button-bloom');
 video.controls = false; video.disablePictureInPicture = true; video.disableRemotePlayback = true;
 const source = document.createElement('canvas'); source.id = 'capture-source'; source.width = 800; source.height = 1000;
 const sourceContext = source.getContext('2d', { alpha: false, willReadFrequently: true });
@@ -17,7 +17,8 @@ let painting, scene, stream, ready = false, generation = 0, facing = 'environmen
 let raf = 0, previewRaf = 0, previewTime = 0, lastFrame = null, renderedFrames = 0, disposed = false;
 let submission = 'idle', submissionElapsed = 0, mosaicPromise, restoreSubmitFocus = false;
 let cameraTransitions = [];
-let capturePreparation, captureTransition, controlTransition;
+let capturePreparation, captureTransition, buttonBloomAnimation, buttonPressAnimation;
+let controlAnimations = [];
 const submissionDuration = 2200, completed = [];
 
 function state(value) {
@@ -36,6 +37,15 @@ function stopCamera() {
 }
 function cancelCameraTransitions() {
   cameraTransitions.forEach(animation => animation.cancel()); cameraTransitions = [];
+}
+function cancelControlAnimations() {
+  controlAnimations.forEach(animation => animation.cancel()); controlAnimations = [];
+}
+function fadeIn(elements, duration = 180) {
+  if (reduceMotion.matches) return;
+  controlAnimations.push(...elements.filter(element => !element.hidden).map(element =>
+    element.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing: 'ease-out' })
+  ));
 }
 function cancelFrame() { cancelAnimationFrame(raf); raf = 0; lastFrame = null; }
 function schedule() { if (!raf && !document.hidden && (session.active || submission === 'joining') && !disposed) raf = requestAnimationFrame(frame); }
@@ -75,7 +85,8 @@ async function openCamera() {
   const returning = ['review','submitted'].includes($('studio').dataset.state);
   const focusShutter = $('again').matches(':focus-visible');
   const token = ++generation; ready = false; shutter.disabled = true; stopCamera();
-  capturePreparation?.abort(); captureTransition?.cancel(); controlTransition?.cancel();
+  capturePreparation?.abort(); captureTransition?.cancel(); cancelControlAnimations();
+  buttonBloomAnimation?.cancel(); buttonPressAnimation?.cancel();
   shutter.classList.remove('is-blooming'); flip.disabled = false;
   painting?.dispose(); painting = null; scene?.dispose(); scene = null; submission = 'idle';
   session.reset(); canvas.setAttribute('aria-hidden', String(!returning)); state(returning ? 'reopening' : 'loading'); message(returning ? '' : 'Allow camera access.');
@@ -112,10 +123,13 @@ async function openCamera() {
     state('ready'); canvas.setAttribute('aria-hidden', 'true');
     canvas.setAttribute('aria-label', 'Your photo blooming into watercolor');
     cancelCameraTransitions(); shutter.disabled = false;
+    fadeIn([shutter]);
     if (returning && focusShutter) shutter.focus({ preventScroll: true });
     void loadMosaicImages();
     navigator.mediaDevices.enumerateDevices?.().then(devices => {
-      if (token === generation && ready) $('flip-camera').hidden = devices.filter(device => device.kind === 'videoinput').length < 2;
+      if (token === generation && ready && devices.filter(device => device.kind === 'videoinput').length > 1) {
+        flip.hidden = false; fadeIn([flip]);
+      }
     }).catch(() => {});
   } catch (error) {
     if (token !== generation || disposed) return;
@@ -134,6 +148,21 @@ function bloomButton(event) {
   const y = event?.detail ? Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)) : bounds.height / 2;
   shutter.style.setProperty('--bloom-x', `${x}px`); shutter.style.setProperty('--bloom-y', `${y}px`);
   shutter.classList.add('is-blooming');
+  // A fresh animation owns every press, including the first one after Retake.
+  // CSS animation state can otherwise survive while the button is hidden.
+  buttonBloomAnimation?.cancel(); buttonPressAnimation?.cancel();
+  if (reduceMotion.matches) return;
+  buttonBloomAnimation = buttonBloom.animate([
+    { opacity: 0, transform: 'translate(-50%,-50%) scale(.03) rotate(-12deg)', offset: 0 },
+    { opacity: 1, offset: .12 },
+    { opacity: .95, offset: .72 },
+    { opacity: .68, transform: 'translate(-50%,-50%) scale(1) rotate(12deg)', offset: 1 }
+  ], { duration: 780, easing: 'cubic-bezier(.16,.68,.25,1)', fill: 'both' });
+  buttonPressAnimation = shutter.animate([
+    { transform: getComputedStyle(shutter).transform },
+    { transform: 'scale(.96)', offset: .25 },
+    { transform: 'scale(1)' }
+  ], { duration: 260, easing: 'ease-out' });
 }
 function capture(event) {
   if (!ready || shutter.disabled || session.state !== 'ready' || !copyVideo(sourceContext, source)) return false;
@@ -189,21 +218,27 @@ function frame(now) {
 }
 async function showReview(animate = false) {
   if (session.state !== 'review' || disposed) return;
+  cancelControlAnimations();
   if (animate && !reduceMotion.matches) {
     state('reviewing');
-    controlTransition = controls.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 130, easing: 'ease-out', fill: 'forwards' });
-    await controlTransition.finished.catch(() => {});
+    // Fade the actual controls, then hide them only after both are transparent.
+    // The incoming actions have their own fade, without resetting a shared row.
+    controlAnimations = [shutter, flip].filter(button => !button.hidden).map(button =>
+      button.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: 'ease-in-out', fill: 'forwards' })
+    );
+    await Promise.all(controlAnimations.map(animation => animation.finished.catch(() => {})));
     if (disposed) return;
   }
   flip.hidden = true;
   state('review'); $('instruction').textContent = '';
   $('again').hidden = false; $('submit').hidden = false;
-  controlTransition?.cancel(); controlTransition = null;
+  cancelControlAnimations(); fadeIn([$('again'), $('submit')]);
   completed.splice(0).forEach(resolve => resolve({ state: session.state, effect: TidalBloom.name, durationMs: session.elapsed, renderedFrames }));
 }
 async function submitPhoto() {
   if (session.state !== 'review' || $('studio').dataset.state !== 'review' || submission !== 'idle' || disposed) return;
   restoreSubmitFocus = $('submit').matches(':focus-visible');
+  cancelControlAnimations();
   submission = 'preparing'; state('submitting'); $('studio').setAttribute('aria-busy', 'true');
   $('submit').disabled = true; $('submit').hidden = true; $('again').hidden = true;
   canvas.setAttribute('aria-label', 'Your photo joining the shared collection');
@@ -227,6 +262,7 @@ function finishSubmission() {
   cancelFrame(); submission = 'complete'; state('submitted'); $('studio').removeAttribute('aria-busy');
   canvas.setAttribute('aria-label', 'Your photo among a collection of Ithaca images');
   $('instruction').textContent = 'Thanks for contributing to the Paint Ithaca project :)'; $('again-label').textContent = 'Capture another'; $('again').hidden = false;
+  cancelControlAnimations(); fadeIn([$('instruction'), $('again')], 200);
   if (restoreSubmitFocus) $('again').focus({ preventScroll: true });
 }
 shutter.addEventListener('click', capture);
@@ -248,7 +284,7 @@ function resume() {
 document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); else resume(); });
 window.addEventListener('pagehide', event => {
   suspend();
-  if (!event.persisted) { disposed = true; capturePreparation?.abort(); captureTransition?.cancel(); controlTransition?.cancel(); painting?.dispose(); scene?.dispose(); }
+  if (!event.persisted) { disposed = true; capturePreparation?.abort(); captureTransition?.cancel(); cancelControlAnimations(); buttonBloomAnimation?.cancel(); buttonPressAnimation?.cancel(); painting?.dispose(); scene?.dispose(); }
 });
 window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
 // Captures only an already-open camera; permission is always managed by the browser.
