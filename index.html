@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ec">
-  <meta name="description" content="Hold a moment. Paint Ithaca with your camera.">
-  <title>Paint Ithaca — hold a moment</title>
+  <meta name="description" content="Take a photo. Watch it bloom into watercolor.">
+  <title>Paint Ithaca</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23bcaecb'/%3E%3Ccircle cx='21' cy='12' r='7' fill='%23d9bfb1' opacity='.6'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,27 +14,20 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a>
-    <button class="camera-source" id="use-camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 1-2h6l1 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="4"/></svg><span id="camera-label">Use my camera</span></button>
-  </header>
-  <main class="camera-studio" data-state="loading" id="studio">
-    <h1 id="heading">Hold a moment.</h1>
+  <header class="topbar"><a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a></header>
+  <main class="camera-studio" data-state="loading" id="studio" aria-label="Watercolor camera">
     <div class="paper-camera" id="viewfinder">
-      <canvas id="painting" aria-label="Your camera view gradually revealed in watercolor"></canvas>
-      <video id="source-video" autoplay muted playsinline hidden></video>
-      <div class="frame-meta"><span id="source-label">CAYUGA LAKE · SAMPLE</span><span id="elapsed" aria-label="Recording duration">00:00</span></div>
-      <span class="paper-signature" aria-hidden="true">ithaca, through your eyes.</span>
-      <div class="camera-message" id="camera-message" hidden><p id="message-text"></p><button id="try-sample">Use the sample view</button></div>
+      <video id="source-video" autoplay muted playsinline aria-label="Live camera preview"></video>
+      <canvas id="painting" aria-hidden="true" aria-label="Your photo blooming into watercolor"></canvas>
+      <div class="camera-message" id="camera-message"><svg class="camera-outline" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 1-2h6l1 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="4"/></svg><p id="message-text">Allow camera access to begin.</p><button id="retry-camera" hidden>Open camera</button></div>
     </div>
     <div class="capture-controls">
-      <div class="side-control"><button id="again" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7"/></svg><span>Again</span></button><button id="flip-camera" class="quiet-button" aria-label="Switch camera" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg><span>Flip</span></button></div>
-      <div class="hold-control"><button id="hold-button" aria-label="Hold to record and paint" aria-describedby="instruction" disabled><svg class="progress-ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="46"/><circle id="ring-progress" cx="50" cy="50" r="46"/></svg><span class="pigment-button"><span class="record-core"></span></span></button></div>
+      <div class="side-control"><button id="again" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7"/></svg><span>Retake</span></button><button id="flip-camera" class="quiet-button" aria-label="Switch camera" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg><span>Flip</span></button></div>
+      <button id="shutter" aria-label="Take photo" aria-describedby="instruction" disabled><svg class="progress-ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="46"/><circle class="ring-progress" cx="50" cy="50" r="46"/></svg><span class="pigment-button"><span class="shutter-core"></span></span></button>
       <div class="side-control"><button id="save" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span id="save-label">Save</span></button></div>
     </div>
-    <p id="instruction" class="instruction" role="status">Hold to paint. Release to keep.</p>
-    <p class="keyboard-hint" id="keyboard-hint">or hold the space bar</p>
+    <p id="instruction" class="instruction" role="status">Find your little corner of Ithaca.</p>
   </main>
-  <footer><span>Just your camera. A little color.</span><a id="photo-credit" href="https://commons.wikimedia.org/wiki/File:Cayuga_Lake%2C_May_2025.jpg" target="_blank" rel="noreferrer">Sample: Acurarri · CC BY-SA 4.0</a><span id="private-note" hidden>Stays on your device.</span></footer>
+  <footer>Your photo stays on your device.</footer>
 </body>
 </html>

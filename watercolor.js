@@ -119,11 +119,11 @@ export class Watercolor {
   render() {
     if (!this.hasSource) return;
     const gl = this.gl;
-    this.draw(this.programs.render, null, [...this.fields(), ['photo', this.photo]], spec => {
+    this.draw(this.programs.render, null, [...this.fields(), ['photo', this.photo], ['mask', this.mask]], spec => {
       gl.uniform3fv(spec.uniform('absorption[0]'), this.materials.flatMap(p => p.absorption));
       gl.uniform3fv(spec.uniform('scattering[0]'), this.materials.flatMap(p => p.scattering));
       gl.uniform1fv(spec.uniform('grains[0]'), pigments.map(p => p.grain));
-      gl.uniform1f(spec.uniform('ghost'), this.painted ? Math.max(0, 1 - this.clock * 3) : 1);
+
     });
   }
   clear() {

@@ -161,9 +161,9 @@ void main() {
 }`;
 export const render = `#version 300 es
 ${common}
-uniform sampler2D fluid, paper, looseA, looseB, fixedA, fixedB, photo;
+uniform sampler2D fluid, paper, looseA, looseB, fixedA, fixedB, photo, mask;
 uniform vec3 absorption[8], scattering[8];
-uniform float grains[8], ghost;
+uniform float grains[8];
 out vec4 color;
 void main() {
   vec4 tooth = texture(paper, uv), water = texture(fluid, uv);
@@ -178,7 +178,7 @@ void main() {
   }
   float dx = texture(paper, uv + vec2(texel.x,0)).r - tooth.r;
   float dy = texture(paper, uv + vec2(0,texel.y)).r - tooth.r;
-  float relief = clamp(.985 - 3.5 * (dx + dy), .9, 1.05);
+  float relief = clamp(.993 - 1.4 * (dx + dy), .96, 1.03);
   float damp = max(wetness(water.r), .85 * smoothstep(.25, .9, water.a));
   vec3 sheet = vec3(.93,.905,.845) * (relief + (random(gl_FragCoord.xy) - .5) * .02) * (1. - .12 * damp);
   float toothEffect = max(.05, 1. + granulation / max(thickness, .00001) * 1.1 * ((tooth.r - .5) * 1.4 + (tooth.b - .5) * .6));
@@ -191,8 +191,15 @@ void main() {
   reflectance = mix(reflectance, .582 * reflectance / (1. - .4 * reflectance), clamp(thickness * 1.5, 0., 1.));
   reflectance += .018 * wetness(water.r);
   vec3 displayColor = pow(clamp(reflectance, 0., 1.), vec3(1. / 2.2));
-  float luma = dot(texture(photo, uv).rgb, vec3(.2126,.7152,.0722));
-  displayColor *= 1. - ghost * .16 * (1. - luma);
+  // The frozen photograph supplies fine detail only inside the painted area.
+  // The fluid and pigment fields remain visible along the entire wet frontier.
+  float wet = wetness(water.r);
+  float interior = smoothstep(.18, .94, texture(mask, uv).a);
+  vec2 drift = water.gb * texel * .35 * wet;
+  vec3 photograph = texture(photo, uv + drift).rgb;
+  vec3 detailedWash = mix(photograph, vec3(.98,.965,.935), .055);
+  detailedWash *= 1. + .035 * (tooth.r - .5);
+  displayColor = mix(displayColor, detailedWash, interior * (.89 - .07 * wet));
   color = vec4(displayColor, 1.);
 }`;
 export const copyMask = `#version 300 es

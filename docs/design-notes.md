@@ -1,13 +1,9 @@
-# One camera, one gesture
+# Point, tap, bloom
 
-The interface centers one sheet of paper, a quiet camera switch, and a pigment-colored hold button. The camera view begins almost like a pencil sketch so the user can frame the scene before recording.
+The live phone camera is the starting screen. The shutter is the only primary action. There is no reference image, “Use my camera” section, or headline above the viewfinder.
 
-Holding advances broad, irregular brush passes across the image. These passes inject color and water into a simulated paper surface. Subtle camera motion affects the path while the source image remains live. Releasing freezes the source, stops new pigment, and gives the wet edges a short settling finish. The same frame becomes the result with only Save and Again.
+A tap freezes the exact visible frame. The camera stops immediately, while a wet spot near the center expands into an irregular watercolor frontier. Color fills the image in two seconds and settles for another 0.8 seconds. The painted interior retains photographic detail; the outer edge carries the real pigment transport, feathering and pooling. The final frame offers Retake and Save without changing the layout.
 
-The interaction deliberately omits the earlier contribution form, photo gallery, filters, settings and community mosaic. It is a frontend camera proof of concept.
+The paper has a subtle 6px radius and subdued grain. Cream, sage and lavender surround the image. Native click and keyboard button activation replace all hold/release behavior.
 
-The material response follows the water transport, fiber percolation, pigment exchange and finite Kubelka–Munk optics studied in [Sudo Aquarelle](https://sudoaquarelle.com/). The reference exposes readable shaders; inspecting those revealed why the earlier photograph-correction loop prevented bleeding. That loop is gone. New brush coverage supplies paint once, then pigment moves independently through water and paper.
-
-Eight pigment materials preserve different staining, granulation and transport rates. Cold-press paper has fixed relief and anisotropic pore thresholds. Color pools at wet edges and continues evolving for 2.2 seconds after release, and these settling frames are included in the saved film.
-
-Camera pixels use a two-pigment mixture to retain low-saturation hues that the reference importer otherwise maps to gray. The reference's source files are not bundled; the implementation uses the same governing model with an independently generated paper texture and camera-specific input. It is not pixel-identical.
+Camera permission is requested on startup. A permission or device problem is explained inside the viewfinder with a retry action. No stock-photo fallback is shown. The demo does not upload photos or access the microphone.

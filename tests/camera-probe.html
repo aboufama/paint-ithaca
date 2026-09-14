@@ -1,0 +1,71 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css"></head><body>
+<script type="module">
+// Test only. This page is excluded from the published build and never opens a real camera.
+const sourceImage = new Image(); sourceImage.src = './fixtures/cayuga-lake.jpg'; await sourceImage.decode();
+const feed = document.createElement('canvas'); feed.width = 800; feed.height = 1000;
+const context = feed.getContext('2d');
+context.drawImage(sourceImage,192,0,576,720,0,0,800,1000);
+let feedTimer;
+let requests = 0, cameraStream, snapshotCount = 0, snapshotPixels, requestOptions;
+Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{
+  async getUserMedia(options) { requests++; requestOptions = options; cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
+  async enumerateDevices() { return [{kind:'videoinput',deviceId:'fixture-camera'}]; }
+}});
+const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
+CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
+  const result = originalDraw.call(this,image,...args);
+  if(image instanceof HTMLVideoElement) { snapshotCount++; snapshotPixels=this.getImageData(0,0,this.canvas.width,this.canvas.height); }
+  return result;
+};
+const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
+document.body.append(...Array.from(html.body.children));
+await import('../app.js');
+function waitForState(name) { return new Promise(resolve=>{
+  const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
+  const observer=new MutationObserver(()=>{if(element.dataset.state===name){observer.disconnect();resolve();}});observer.observe(element,{attributes:true,attributeFilter:['data-state']});
+}); }
+function assert(condition,text) { if(!condition)throw new Error(text); }
+async function checkCapture() {
+  await waitForState('ready');
+  assert(requests===1,'Camera should request permission once on startup');
+  assert(requestOptions.audio===false,'Camera must not request microphone');
+  const shutter=document.getElementById('shutter');assert(!shutter.disabled,'Shutter not enabled after video ready');
+  assert(snapshotCount===0,'Photo captured before clicking');
+  shutter.click();shutter.click();
+  assert(snapshotCount===1,'Shutter must copy exactly one frozen frame');
+  assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop after snapshot');
+  clearInterval(feedTimer); context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000); // later feed must not replace the captured image
+  await waitForState('review');
+  assert(snapshotCount===1,'Animation read the camera after the snapshot');
+  assert(requests===1,'Animation restarted camera');
+  const canvas=document.getElementById('painting'),gl=canvas.getContext('webgl2');
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  const pixels=new Uint8Array(canvas.width*canvas.height*4);gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+  let error=0, count=0;
+  for(let y=.1;y<.9;y+=.05)for(let x=.1;x<.9;x+=.05){
+    const actual=(Math.floor((1-y)*canvas.height)*canvas.width+Math.floor(x*canvas.width))*4;
+    const original=(Math.floor(y*snapshotPixels.height)*snapshotPixels.width+Math.floor(x*snapshotPixels.width))*4;
+    for(let c=0;c<3;c++){error+=Math.abs(pixels[actual+c]-snapshotPixels.data[original+c]);count++;}
+  }
+  const meanColorError=error/count;assert(meanColorError<50,'Frozen photo detail or color was lost');
+  assert(!document.getElementById('save').hidden,'Save must be available after completion');
+  assert(!document.getElementById('again').hidden,'Retake must be available after completion');
+  assert(gl.getError()===gl.NO_ERROR,'WebGL error');
+  return {passed:true,cameraRequests:requests,snapshotCount,cameraStopped:true,meanColorError,outcome:'One click captured and painted one immutable photo.'};
+}
+async function checkRetake() {
+  assert(document.getElementById('studio').dataset.state==='review','Run capture checks before Retake');
+  document.getElementById('again').click();await waitForState('ready');
+  assert(requests===2,'Retake must open a fresh camera stream');
+  document.getElementById('shutter').click();
+  const canvas=document.getElementById('painting'),gl=canvas.getContext('webgl2'),pixel=new Uint8Array(4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.readPixels(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+  assert(pixel[0]>225&&pixel[1]>225&&pixel[2]>225,'Retake flashed the old completed mask before the bloom');
+  clearInterval(feedTimer);await waitForState('review');
+  assert(snapshotCount===2,'Retake must capture exactly one new photo');
+  assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Retake camera was not stopped');
+  return {passed:true,cameraRequests:requests,snapshotCount,cleanPaperAtStart:true};
+}
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_retake_checks',description:'After the capture check, verify Retake opens a fresh synthetic camera and starts from clean paper. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkRetake});
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_capture_checks',description:'Run the complete shutter and watercolor flow against a synthetic video feed. Does not access a physical camera.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkCapture});
+</script></body></html>
