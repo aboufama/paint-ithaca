@@ -1,6 +1,6 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=flow-2"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=capture-2"></head><body>
 <script type="module">
-import TidalBloom from '../tidal-bloom.js?v=quick-1';
+import TidalBloom from '../tidal-bloom.js?v=capture-2';
 import { SubmissionScene } from '../submission-scene.js?v=submit-2';
 // Test only. This page is excluded from the published build and never opens a real camera.
 const sourceImage = new Image(); sourceImage.src = './fixtures/cayuga-lake.jpg'; await sourceImage.decode();
@@ -10,6 +10,16 @@ context.drawImage(sourceImage,192,0,576,720,0,0,800,1000);
 let feedTimer;
 let requests = 0, cameraStream, snapshotCount = 0, previewFrames = 0, snapshotPixels, snapshotCanvas, requestOptions;
 let scenePreparations = 0, sceneFinals = 0, mosaicImages = 0, mosaicTiles = 0, submissionStartPixels, exactSubmissionStart = false;
+const rendererPreparations=[];
+const originalCreateAsync=TidalBloom.createAsync;
+TidalBloom.createAsync=async function(...args) {
+  const metric={frames:0,started:performance.now(),completed:false};rendererPreparations.push(metric);
+  let active=true,frameId=0;
+  const tick=()=>{if(active){metric.frames++;frameId=requestAnimationFrame(tick);}};
+  frameId=requestAnimationFrame(tick);
+  try {const renderer=await originalCreateAsync.apply(this,args);metric.completed=true;return renderer;}
+  finally {active=false;cancelAnimationFrame(frameId);metric.durationMs=performance.now()-metric.started;}
+};
 const networkRequests = [];
 const originalFetch = window.fetch.bind(window);
 window.fetch = (input, options = {}) => {
@@ -32,8 +42,8 @@ SubmissionScene.prototype.draw = function(progress) {
   if (progress === 1) sceneFinals++;
 };
 Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{
-  async getUserMedia(options) { requests++; requestOptions = options; cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
-  async enumerateDevices() { return [{kind:'videoinput',deviceId:'fixture-camera'}]; }
+  async getUserMedia(options) { requests++; requestOptions = options; context.drawImage(sourceImage,192,0,576,720,0,0,800,1000); cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
+  async enumerateDevices() { return [{kind:'videoinput',deviceId:'fixture-camera-back'},{kind:'videoinput',deviceId:'fixture-camera-front'}]; }
 }});
 const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
 CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
@@ -44,7 +54,7 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=flow-1');
+await import('../app.js?v=capture-2');
 function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
@@ -55,6 +65,118 @@ function assertPaintingShutter() {
   const shutter=document.getElementById('shutter'),style=getComputedStyle(shutter);
   assert(!shutter.hidden&&shutter.disabled,'Shutter must remain visible but disabled during painting');
   assert(style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0,'Painting must not visually hide the shutter');
+}
+async function waitForFlipReady() {
+  await waitForState('ready');
+  const flip=document.getElementById('flip-camera'),deadline=performance.now()+12000;
+  while(flip.hidden||flip.disabled) {
+    assert(performance.now()<deadline,'Two-camera enumeration did not make Flip available');
+    await new Promise(requestAnimationFrame);
+  }
+  await Promise.all(document.querySelector('.capture-controls').getAnimations().map(animation=>animation.finished.catch(()=>{})));
+}
+function assertSnapshotOn(canvas,label) {
+  assert(canvas.width===snapshotPixels.width&&canvas.height===snapshotPixels.height,`${label} dimensions differ from the frozen photo`);
+  const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+  assert(pixels.every((value,index)=>value===snapshotPixels.data[index]),`${label} must show the exact unmodified frozen photo`);
+}
+function captureBounds() {
+  return Object.fromEntries(['viewfinder','shutter','flip-camera'].map(id=>[id,document.getElementById(id).getBoundingClientRect()]));
+}
+function assertCaptureControls(bounds,allowFade=false) {
+  const shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
+  assert(!shutter.hidden&&shutter.disabled&&!flip.hidden&&flip.disabled,'Camera and Flip must remain present and disabled until review');
+  assert(getComputedStyle(document.querySelector('.capture-controls')).display==='grid','Capture must retain the same controls grid');
+  if(!allowFade)assertPaintingShutter();
+  assert(document.getElementById('again').hidden&&document.getElementById('submit').hidden,'Review actions must wait for the coordinated transition');
+  for(const [id,before] of Object.entries(bounds)) {
+    const after=document.getElementById(id).getBoundingClientRect();
+    for(const key of ['x','y','width','height'])assert(Math.abs(after[key]-before[key])<=1,`${id} ${key} moved while retaining capture controls`);
+  }
+}
+async function verifyCrossfadeVisibilityPause(animation) {
+  const hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');
+  try {
+    Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});
+    document.dispatchEvent(new Event('visibilitychange'));
+    assert(animation.playState==='paused','Hiding the page must pause the active photo crossfade');
+    await animation.ready;
+    const pausedTime=animation.currentTime;
+    await new Promise(resolve=>setTimeout(resolve,80));
+    assert(animation.playState==='paused'&&Math.abs(animation.currentTime-pausedTime)<1,'Crossfade must stay frozen while the page is hidden');
+  } finally {
+    if(hiddenDescriptor)Object.defineProperty(document,'hidden',hiddenDescriptor);else delete document.hidden;
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+  assert(animation.playState==='running','Showing the page must resume the paused photo crossfade');
+  return true;
+}
+async function captureThroughReview(expectedSnapshots) {
+  await waitForFlipReady();
+  const studio=document.getElementById('studio'),shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
+  const canvas=document.getElementById('painting'),preview=document.getElementById('camera-preview');
+  const bounds=captureBounds(),priorRequests=requests,priorPreparations=rendererPreparations.length;
+  const states=[],paintingOpacities=[];
+  let failure=null,frameId=0,paintingFrames=0,preparingFrames=0,firstPaintingCheck=false,pauseCheck,visibilityPauseVerified=false;
+  const inspect=()=>{
+    try {
+      const value=studio.dataset.state;
+      if(states.at(-1)!==value)states.push(value);
+      if(['preparing','painting','reviewing'].includes(value)) {
+        assertCaptureControls(bounds,value==='reviewing');
+        assert(snapshotCount===expectedSnapshots&&requests===priorRequests,'Preparation or animation reopened or recaptured the camera');
+      }
+      if(value==='painting') {
+        const opacity=Number(getComputedStyle(canvas).opacity);paintingOpacities.push(opacity);
+        assert(Number(getComputedStyle(preview).opacity)>.99,'Frozen photo must remain visible beneath the incoming watercolor');
+        if(!firstPaintingCheck){assertSnapshotOn(preview,'Frozen preview beneath watercolor');firstPaintingCheck=true;}
+        if(!pauseCheck&&opacity>.05&&opacity<.95&&!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          const animation=canvas.getAnimations().find(candidate=>candidate.effect?.target===canvas&&candidate.playState==='running');
+          assert(animation,'The visible crossfade must have an active canvas animation');
+          pauseCheck=verifyCrossfadeVisibilityPause(animation).then(passed=>{visibilityPauseVerified=passed;}).catch(error=>{failure ||= error;});
+        }
+      }
+    } catch(error) {failure ||= error;}
+  };
+  const observer=new MutationObserver(inspect);
+  observer.observe(studio,{attributes:true,attributeFilter:['data-state']});
+  const tick=()=>{
+    if(studio.dataset.state==='preparing')preparingFrames++;
+    if(studio.dataset.state==='painting')paintingFrames++;
+    inspect();
+    if(!['review','error'].includes(studio.dataset.state))frameId=requestAnimationFrame(tick);
+  };
+  frameId=requestAnimationFrame(tick);
+  let clickReturnMs;
+  try {
+    const started=performance.now();shutter.click();shutter.click();clickReturnMs=performance.now()-started;
+    assert(clickReturnMs<200,`Shutter blocked the interface for ${clickReturnMs.toFixed(1)}ms`);
+    assert(studio.dataset.state==='preparing','Capture must return immediately in the asynchronous preparing state');
+    assert(snapshotCount===expectedSnapshots,'Double capture must copy one immutable camera frame');
+    assertSnapshotOn(canvas,'Initial painting surface');assertSnapshotOn(preview,'Initial frozen preview');
+    assert(Number(getComputedStyle(canvas).opacity)>0||Number(getComputedStyle(preview).opacity)>0,'The captured photograph must remain visible during preparation');
+    assertCaptureControls(bounds);
+    assert(shutter.classList.contains('is-blooming')&&shutter.querySelector('.button-bloom'),'Camera button must start its internal bloom on capture');
+    assert(['hidden','clip'].includes(getComputedStyle(shutter).overflow),'The button bloom must be clipped inside the camera button');
+    const icon=shutter.querySelector('svg');
+    assert(shutter.getAttribute('aria-label')==='Painting photo'&&icon&&getComputedStyle(icon).display!=='none'&&Number(getComputedStyle(icon).opacity)>0,'Camera button must keep its Painting photo label and visible camera icon');
+    flip.click();assert(requests===priorRequests,'Disabled Flip must not reopen the camera during preparation');
+    assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop immediately after capture');
+    clearInterval(feedTimer);context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000);
+    inspect();await waitForState('review');if(pauseCheck)await pauseCheck;inspect();
+  } finally {observer.disconnect();cancelAnimationFrame(frameId);}
+  if(failure)throw failure;
+  const preparation=rendererPreparations[priorPreparations];
+  assert(rendererPreparations.length===priorPreparations+1&&preparation.completed,'Each capture must prepare one asynchronous renderer');
+  assert(preparation.frames>0&&preparingFrames>0,'Renderer preparation must yield to browser animation frames');
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  assert(paintingFrames>1||reduced,'Watercolor must render multiple animation frames');
+  assert(states.includes('painting')||reduced,'Prepared renderer must enter painting');
+  assert(states.includes('reviewing')||reduced,'Controls must pass through the coordinated reviewing fade');
+  assert(reduced||paintingOpacities.some(opacity=>opacity>0&&opacity<1),'Watercolor must crossfade over the frozen photograph');
+  assert(reduced||visibilityPauseVerified,'Capture must verify mid-crossfade page hiding and resuming');
+  assert(shutter.hidden&&flip.hidden&&!document.getElementById('again').hidden&&!document.getElementById('submit').hidden,'Review must replace both capture controls with Retake and Submit');
+  return {clickReturnMs,preparationFrames:preparation.frames,preparationDurationMs:preparation.durationMs,preparingFrames,paintingFrames,transitionStates:states,exactFrozenFirstFrame:true,retainedCaptureControls:true,visibilityPauseVerified};
 }
 function assertFrozenSource() {
   assert(snapshotCanvas.width===snapshotPixels.width&&snapshotCanvas.height===snapshotPixels.height,'Frozen source dimensions changed after capture');
@@ -102,13 +224,9 @@ async function checkCapture() {
   assertCanvasPreview();
   const shutter=document.getElementById('shutter');assert(!shutter.disabled,'Shutter not enabled after video ready');
   assert(snapshotCount===0,'Photo captured before clicking');
-  shutter.click();shutter.click();
-  assert(snapshotCount===1,'Shutter must copy exactly one frozen frame');
-  assertPaintingShutter();
+  const transition=await captureThroughReview(1);
   assert(!document.getElementById('source-video').controls,'Native pause controls must not be offered');
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop after snapshot');
-  clearInterval(feedTimer); context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000); // later feed must not replace the captured image
-  await waitForState('review');
   assert(shutter.hidden,'Shutter should hide when Retake and Submit become available');
   assert(snapshotCount===1,'Animation read the camera after the snapshot');
   assert(requests===1,'Animation restarted camera');
@@ -125,24 +243,20 @@ async function checkCapture() {
   assert(!document.getElementById('submit').hidden,'Submit must be available after completion');
   assert(!document.getElementById('save'),'Save should be removed from the camera flow');
   assert(!document.getElementById('again').hidden,'Retake must be available after completion');
-  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,canvasPreview:true,cameraStopped:true,meanColorError,...selectedEffect,outcome:'One click captured one immutable photo and rendered the selected Tidal Bloom effect.'};
+  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,canvasPreview:true,cameraStopped:true,meanColorError,...transition,...selectedEffect,outcome:'One responsive click preserved the frozen photo, prepared asynchronously, and rendered the selected Tidal Bloom effect.'};
 }
 async function checkRetake() {
   assert(document.getElementById('studio').dataset.state==='review','Run capture checks before Retake');
   document.getElementById('again').click();await waitForState('ready');
   assert(requests===2,'Retake must open a fresh camera stream');
   assertCanvasPreview();
-  document.getElementById('shutter').click();
-  assertPaintingShutter();
+  const transition=await captureThroughReview(2);
   const canvas=document.getElementById('painting'),paintingContext=canvas.getContext('2d');
-  const pixel=paintingContext.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
-  assert(pixel[0]>230&&pixel[1]>225&&pixel[2]>210&&pixel[3]===255,'Retake flashed the old completed image before the bloom');
-  clearInterval(feedTimer);await waitForState('review');
   assert(document.getElementById('shutter').hidden,'Retake should hide the shutter once review actions appear');
   assert(snapshotCount===2,'Retake must capture exactly one new photo');
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Retake camera was not stopped');
   const selectedEffect=assertTidalBloomFinish(canvas,paintingContext.getImageData(0,0,canvas.width,canvas.height).data);
-  return {passed:true,cameraRequests:requests,snapshotCount,cleanPaperAtStart:true,...selectedEffect};
+  return {passed:true,cameraRequests:requests,snapshotCount,...transition,...selectedEffect};
 }
 async function checkSubmit() {
   const studio=document.getElementById('studio'),submit=document.getElementById('submit');

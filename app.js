@@ -1,9 +1,10 @@
-import TidalBloom from './tidal-bloom.js?v=quick-1';
+import TidalBloom from './tidal-bloom.js?v=capture-2';
 import { CaptureSession } from './capture-session.js';
 import { SubmissionScene } from './submission-scene.js?v=submit-2';
 
 const $ = id => document.getElementById(id);
 const video = $('source-video'), preview = $('camera-preview'), canvas = $('painting'), shutter = $('shutter');
+const flip = $('flip-camera'), controls = shutter.parentElement;
 video.controls = false; video.disablePictureInPicture = true; video.disableRemotePlayback = true;
 const source = document.createElement('canvas'); source.id = 'capture-source'; source.width = 800; source.height = 1000;
 const sourceContext = source.getContext('2d', { alpha: false, willReadFrequently: true });
@@ -16,12 +17,13 @@ let painting, scene, stream, ready = false, generation = 0, facing = 'environmen
 let raf = 0, previewRaf = 0, previewTime = 0, lastFrame = null, renderedFrames = 0, disposed = false;
 let submission = 'idle', submissionElapsed = 0, mosaicPromise, restoreSubmitFocus = false;
 let cameraTransitions = [];
+let capturePreparation, captureTransition, controlTransition;
 const submissionDuration = 2200, completed = [];
 
 function state(value) {
   $('studio').dataset.state = value;
   shutter.hidden = ['review','submitting','submitted','reopening','returning'].includes(value);
-  shutter.setAttribute('aria-label', ['painting','settling'].includes(value) ? 'Painting photo' : 'Take photo');
+  shutter.setAttribute('aria-label', ['preparing','painting','settling','reviewing'].includes(value) ? 'Painting photo' : 'Take photo');
   preview.setAttribute('aria-hidden', String(!['ready','returning'].includes(value)));
 }
 function message(text, retry = false) {
@@ -69,10 +71,12 @@ async function loadMosaicImages() {
 }
 
 async function openCamera() {
-  if (session.active || ['preparing','joining'].includes(submission) || ['reopening','returning'].includes($('studio').dataset.state) || disposed) return;
+  if (session.active || ['preparing','joining'].includes(submission) || ['preparing','reviewing','reopening','returning'].includes($('studio').dataset.state) || disposed) return;
   const returning = ['review','submitted'].includes($('studio').dataset.state);
   const focusShutter = $('again').matches(':focus-visible');
   const token = ++generation; ready = false; shutter.disabled = true; stopCamera();
+  capturePreparation?.abort(); captureTransition?.cancel(); controlTransition?.cancel();
+  shutter.classList.remove('is-blooming'); flip.disabled = false;
   painting?.dispose(); painting = null; scene?.dispose(); scene = null; submission = 'idle';
   session.reset(); canvas.setAttribute('aria-hidden', String(!returning)); state(returning ? 'reopening' : 'loading'); message(returning ? '' : 'Allow camera access.');
   $('instruction').textContent = ''; $('studio').removeAttribute('aria-busy');
@@ -124,21 +128,48 @@ async function openCamera() {
     message(copy[error.name] || 'Your camera couldn’t start. Try again.', true);
   }
 }
-function capture() {
+function bloomButton(event) {
+  const bounds = shutter.getBoundingClientRect();
+  const x = event?.detail ? Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)) : bounds.width / 2;
+  const y = event?.detail ? Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)) : bounds.height / 2;
+  shutter.style.setProperty('--bloom-x', `${x}px`); shutter.style.setProperty('--bloom-y', `${y}px`);
+  shutter.classList.add('is-blooming');
+}
+function capture(event) {
   if (!ready || shutter.disabled || session.state !== 'ready' || !copyVideo(sourceContext, source)) return false;
-  ready = false; ++generation; shutter.disabled = true; $('flip-camera').hidden = true;
+  ready = false; ++generation; shutter.disabled = true; flip.disabled = true;
   // The immutable, unpainted photograph remains separate from all preview effects.
+  // Keep that exact frame on both visible surfaces before releasing the camera.
+  previewContext.drawImage(source, 0, 0); paintingContext.drawImage(source, 0, 0);
+  canvas.setAttribute('aria-hidden', 'false'); state('preparing'); message(''); bloomButton(event);
   stopCamera();
+  capturePreparation = new AbortController();
+  void preparePainting(capturePreparation.signal);
+  return true;
+}
+async function preparePainting(signal) {
   try {
     painting?.dispose(); painting = null;
-    painting = TidalBloom.create({ width: canvas.width, height: canvas.height, photo: source });
-    painting.draw(paintingContext, 0);
+    const next = await TidalBloom.createAsync({ width: canvas.width, height: canvas.height, photo: source }, { signal });
+    if (disposed || signal.aborted) { next.dispose(); return; }
+    painting = next;
+    session.begin(); state('painting');
+    // The frozen photograph stays underneath. The first paper/sketch frames
+    // dissolve into it instead of cutting to an empty, bright viewfinder.
+    if (!reduceMotion.matches) {
+      captureTransition = canvas.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 360, easing: 'ease-in-out' });
+      if (document.hidden) captureTransition.pause();
+    }
+    painting.draw(paintingContext, reduceMotion.matches ? 1 : 0);
+    renderedFrames = 1; lastFrame = null;
+    if (reduceMotion.matches) { session.advance(TidalBloom.duration); showReview(); }
+    else schedule();
   } catch {
+    if (signal.aborted || disposed) return;
     painting?.dispose(); painting = null;
-    state('error'); message('Couldn’t paint this photo. Tap to try again.', true); return false;
+    state('error'); flip.hidden = true; message('Couldn’t paint this photo. Tap to try again.', true);
+    completed.splice(0).forEach(resolve => resolve({ state: 'error', message: 'Couldn’t paint this photo.' }));
   }
-  session.begin(); canvas.setAttribute('aria-hidden', 'false'); state('painting'); message('');
-  renderedFrames = 1; lastFrame = null; schedule(); return true;
 }
 function frame(now) {
   raf = 0;
@@ -153,17 +184,25 @@ function frame(now) {
   }
   if (!session.active) return;
   session.advance(delta); painting.draw(paintingContext, session.progress); renderedFrames++;
-  if (session.state === 'review') { cancelFrame(); showReview(); }
+  if (session.state === 'review') { cancelFrame(); void showReview(true); }
   else { state(session.state); schedule(); }
 }
-function showReview() {
+async function showReview(animate = false) {
   if (session.state !== 'review' || disposed) return;
+  if (animate && !reduceMotion.matches) {
+    state('reviewing');
+    controlTransition = controls.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 130, easing: 'ease-out', fill: 'forwards' });
+    await controlTransition.finished.catch(() => {});
+    if (disposed) return;
+  }
+  flip.hidden = true;
   state('review'); $('instruction').textContent = '';
   $('again').hidden = false; $('submit').hidden = false;
+  controlTransition?.cancel(); controlTransition = null;
   completed.splice(0).forEach(resolve => resolve({ state: session.state, effect: TidalBloom.name, durationMs: session.elapsed, renderedFrames }));
 }
 async function submitPhoto() {
-  if (session.state !== 'review' || submission !== 'idle' || disposed) return;
+  if (session.state !== 'review' || $('studio').dataset.state !== 'review' || submission !== 'idle' || disposed) return;
   restoreSubmitFocus = $('submit').matches(':focus-visible');
   submission = 'preparing'; state('submitting'); $('studio').setAttribute('aria-busy', 'true');
   $('submit').disabled = true; $('submit').hidden = true; $('again').hidden = true;
@@ -197,16 +236,21 @@ $('flip-camera').addEventListener('click', () => { facing = facing === 'environm
 $('submit').addEventListener('click', submitPhoto);
 function suspend() {
   ++generation; cancelFrame(); stopCamera();
+  if (captureTransition?.playState === 'running') captureTransition.pause();
   if (ready || ['loading','reopening','returning'].includes($('studio').dataset.state)) {
     ready = false; shutter.disabled = true; $('flip-camera').hidden = true; state('paused'); message('Tap to reopen your camera.', true);
   }
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); else schedule(); });
+function resume() {
+  if (captureTransition?.playState === 'paused') captureTransition.play();
+  schedule();
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); else resume(); });
 window.addEventListener('pagehide', event => {
   suspend();
-  if (!event.persisted) { disposed = true; painting?.dispose(); scene?.dispose(); }
+  if (!event.persisted) { disposed = true; capturePreparation?.abort(); captureTransition?.cancel(); controlTransition?.cancel(); painting?.dispose(); scene?.dispose(); }
 });
-window.addEventListener('pageshow', event => { if (event.persisted) schedule(); });
+window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
 // Captures only an already-open camera; permission is always managed by the browser.
 if (document.modelContext?.registerTool) {
   try { Promise.resolve(document.modelContext.registerTool({

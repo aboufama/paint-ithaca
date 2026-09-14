@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <defs>
+    <filter id="bleed" x="-25%" y="-25%" width="150%" height="150%">
+      <feTurbulence type="fractalNoise" baseFrequency=".075" numOctaves="3" seed="14" result="grain"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale="15" xChannelSelector="R" yChannelSelector="G"/>
+      <feGaussianBlur stdDeviation=".6"/>
+    </filter>
+    <radialGradient id="wash"><stop offset=".62" stop-color="white"/><stop offset=".89" stop-color="white" stop-opacity=".75"/><stop offset="1" stop-color="white" stop-opacity="0"/></radialGradient>
+  </defs>
+  <path fill="url(#wash)" filter="url(#bleed)" d="M90 10C109 7 115 23 131 30S164 44 162 66 173 100 155 117 141 149 120 153 90 170 72 155 36 154 30 132 9 104 18 85 14 51 36 42 67 13 90 10Z"/>
+</svg>

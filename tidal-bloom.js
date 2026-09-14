@@ -13,35 +13,33 @@ function noise(x, y) {
   return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
 }
 
-// Graphite's pencil appears first, then Tidal's watercolor floods through
-// Sunprint's developing edge. Every draw is a pure function of progress.
-export default {
-  id: '01',
-  name: 'Tidal Bloom',
-  description: 'Natural watercolor follows delicate pencil into a softly branching bloom.',
-  duration: 2000,
-  create({ width, height, photo }) {
-    const makeCanvas = (w = width, h = height) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      return canvas;
-    };
-    let seed = 17013;
-    const random = () => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-    const paper = makeCanvas();
-    const painted = makeCanvas();
-    const grain = makeCanvas();
-    const graphite = makeCanvas();
-    const revealed = makeCanvas();
-    const mw = Math.max(1, Math.ceil(width / 3));
-    const mh = Math.max(1, Math.ceil(height / 3));
-    const mask = makeCanvas(mw, mh);
-    const sketchMask = makeCanvas(mw, mh);
-    const bath = makeCanvas(mw, mh);
+// Both entry points run this same preparation sequence, so cooperative work
+// changes scheduling without changing a single pigment or animation frame.
+function* prepare({ width, height, photo }) {
+  const makeCanvas = (w = width, h = height) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    return canvas;
+  };
+  let seed = 17013;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const paper = makeCanvas();
+  const painted = makeCanvas();
+  const grain = makeCanvas();
+  const graphite = makeCanvas();
+  const revealed = makeCanvas();
+  const mw = Math.max(1, Math.ceil(width / 3));
+  const mh = Math.max(1, Math.ceil(height / 3));
+  const mask = makeCanvas(mw, mh);
+  const sketchMask = makeCanvas(mw, mh);
+  const bath = makeCanvas(mw, mh);
+  const canvases = [paper, painted, grain, graphite, revealed, mask, sketchMask, bath];
+  let complete = false;
+  try {
     const pctx = paper.getContext('2d');
     const paint = painted.getContext('2d', { willReadFrequently: true });
     const gctx = grain.getContext('2d');
@@ -68,10 +66,12 @@ export default {
         grainPixels.data[i + 2] = bright ? 245 : 68;
         grainPixels.data[i + 3] = 4 + random() * 18;
       }
+      if ((y & 15) === 15) yield;
     }
     pctx.putImageData(paperPixels, 0, 0);
     gctx.putImageData(grainPixels, 0, 0);
 
+    yield;
     paint.filter = 'blur(0.55px) saturate(0.82) contrast(0.95)';
     paint.drawImage(photo, 0, 0, width, height);
     paint.filter = 'none';
@@ -80,6 +80,7 @@ export default {
     try {
       const pixels = paint.getImageData(0, 0, width, height);
       const data = pixels.data;
+      yield;
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
@@ -96,6 +97,7 @@ export default {
           data[i + 2] = pigment(blue) * (1 - paperShow) + 226 * paperShow + deposit;
           data[i + 3] = 255;
         }
+        if ((y & 15) === 15) yield;
       }
       paint.putImageData(pixels, 0, 0);
     } catch {
@@ -107,15 +109,18 @@ export default {
     paint.drawImage(grain, 0, 0);
     paint.globalAlpha = 1;
 
+    yield;
     // Graphite Blooms contributes only its photographic pencil contours and
     // occasional cross-grain shading. The photograph keeps its natural colors.
     try {
       pencil.drawImage(photo, 0, 0, width, height);
       const sourcePixels = pencil.getImageData(0, 0, width, height).data;
       const gray = new Float32Array(width * height);
+      yield;
       for (let i = 0; i < gray.length; i++) {
         const k = i * 4;
         gray[i] = sourcePixels[k] * 0.299 + sourcePixels[k + 1] * 0.587 + sourcePixels[k + 2] * 0.114;
+        if ((i + 1) % (width * 16) === 0) yield;
       }
       const lines = pencil.createImageData(width, height);
       const pencilGrain = (x, y) => {
@@ -139,6 +144,7 @@ export default {
           lines.data[k + 2] = 58;
           lines.data[k + 3] = Math.min(155, alpha);
         }
+        if ((y & 15) === 15) yield;
       }
       pencil.clearRect(0, 0, width, height);
       pencil.putImageData(lines, 0, 0);
@@ -152,6 +158,7 @@ export default {
       pencil.clearRect(0, 0, width, height);
     }
 
+    yield;
     // Sunprint's branching, softly serrated arrival field controls the color
     // and capillary edge that wash over the quickly appearing pencil sketch.
     const maskPixels = mctx.createImageData(mw, mh);
@@ -178,9 +185,13 @@ export default {
         bathPixels.data[k + 1] = 107;
         bathPixels.data[k + 2] = 98;
       }
+      if ((y & 15) === 15) yield;
     }
     const span = Math.max(0.001, latest - earliest);
-    for (let i = 0; i < arrival.length; i++) arrival[i] = 0.05 + (arrival[i] - earliest) / span * 0.75;
+    for (let i = 0; i < arrival.length; i++) {
+      arrival[i] = 0.05 + (arrival[i] - earliest) / span * 0.75;
+      if ((i + 1) % (mw * 16) === 0) yield;
+    }
     let disposed = false;
 
     const reveal = (ctx, layer, layerMask) => {
@@ -193,6 +204,7 @@ export default {
       ctx.drawImage(revealed, 0, 0);
     };
 
+    complete = true;
     return {
       draw(ctx, progress) {
         if (disposed) return;
@@ -236,11 +248,69 @@ export default {
       },
       dispose() {
         disposed = true;
-        for (const canvas of [paper, painted, grain, graphite, revealed, mask, sketchMask, bath]) {
+        for (const canvas of canvases) {
           canvas.width = 0;
           canvas.height = 0;
         }
       },
     };
+  } finally {
+    // Returning early from the generator (for example on an aborted capture)
+    // frees intermediate backing stores as well as completed renderers do.
+    if (!complete) for (const canvas of canvases) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+}
+
+function cooperativeYield() {
+  if (typeof globalThis.scheduler?.yield === 'function') {
+    return { wait: () => globalThis.scheduler.yield(), close() {} };
+  }
+  if (typeof MessageChannel === 'function') {
+    const channel = new MessageChannel();
+    return {
+      wait: () => new Promise(resolve => {
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+      }),
+      close() { channel.port1.close(); channel.port2.close(); },
+    };
+  }
+  return { wait: () => new Promise(resolve => setTimeout(resolve, 0)), close() {} };
+}
+
+// Graphite's pencil appears first, then Tidal's watercolor floods through
+// Sunprint's developing edge. Every draw is a pure function of progress.
+export default {
+  id: '01',
+  name: 'Tidal Bloom',
+  description: 'Natural watercolor follows delicate pencil into a softly branching bloom.',
+  duration: 2000,
+  create(options) {
+    const sequence = prepare(options);
+    let step;
+    do { step = sequence.next(); } while (!step.done);
+    return step.value;
+  },
+  async createAsync(options, { signal } = {}) {
+    const sequence = prepare(options);
+    const host = cooperativeYield();
+    try {
+      for (;;) {
+        const started = performance.now();
+        do {
+          if (signal?.aborted) throw signal.reason ?? new DOMException('Preparation aborted', 'AbortError');
+          const step = sequence.next();
+          if (step.done) return step.value;
+        } while (performance.now() - started < 6);
+        // Fine row chunks keep input and camera-preview painting responsive.
+        await host.wait();
+      }
+    } finally {
+      sequence.return();
+      host.close();
+    }
   },
 };

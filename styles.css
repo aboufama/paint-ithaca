@@ -17,8 +17,8 @@ svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-l
 #source-video{position:absolute;width:1px;height:1px;left:0;top:0;opacity:0;clip-path:inset(50%);pointer-events:none}
 #source-video::-webkit-media-controls{display:none!important}
 #camera-preview,#painting{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;opacity:0}
-.camera-studio:is([data-state=ready],[data-state=returning]) #camera-preview{opacity:1}
-.camera-studio:is([data-state=painting],[data-state=settling],[data-state=review],[data-state=submitting],[data-state=submitted],[data-state=reopening],[data-state=returning]) #painting{opacity:1}
+.camera-studio:is([data-state=ready],[data-state=preparing],[data-state=painting],[data-state=settling],[data-state=reviewing],[data-state=returning]) #camera-preview{opacity:1}
+.camera-studio:is([data-state=preparing],[data-state=painting],[data-state=settling],[data-state=reviewing],[data-state=review],[data-state=submitting],[data-state=submitted],[data-state=reopening],[data-state=returning]) #painting{opacity:1}
 .camera-studio:is([data-state=submitting],[data-state=submitted],[data-state=reopening]) .paper-camera{box-shadow:0 0 0 #0000;outline-color:transparent;background:var(--paper)}
 .camera-message{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;padding:35px;background:#f0efe7;text-align:center}
 .camera-outline{width:32px;height:32px;color:#a8ad9a;stroke-width:1}
@@ -30,12 +30,15 @@ svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-l
 .quiet-button svg{width:21px;height:21px}
 #shutter{width:76px;height:76px;justify-self:center;display:grid;place-items:center;position:relative;overflow:hidden;border:1px solid #cecbd29c;border-radius:50%;background:linear-gradient(145deg,#f0edea 5%,#e9e2ed 55%,#dadfd6);box-shadow:inset 0 1px 1px #fff9,0 2px 6px #625e6b0b;color:#646b61;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #shutter::before{content:'';position:absolute;inset:0;opacity:.12;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23888' filter='url(%23g)' d='M0 0h128v128H0z'/%3E%3C/svg%3E");mix-blend-mode:multiply}
-#shutter svg{position:relative;width:29px;height:29px;stroke-width:1.35}
+#shutter::before{z-index:1}
+#shutter svg{position:relative;z-index:2;width:29px;height:29px;stroke-width:1.35}
+.button-bloom{position:absolute;left:var(--bloom-x,50%);top:var(--bloom-y,50%);width:170px;height:170px;pointer-events:none;opacity:0;transform:translate(-50%,-50%) scale(.03);border-radius:43% 57% 61% 39% / 56% 41% 59% 44%;background:radial-gradient(ellipse at 36% 32%,#c5926766 0%,#cbb18455 24%,transparent 54%),radial-gradient(ellipse at 65% 65%,#8a9b7170 0%,#acb79477 32%,transparent 65%),radial-gradient(ellipse at 44% 56%,#b4a1be80 0%,#c2adcd55 45%,transparent 68%);mask-image:url('assets/button-bloom.svg');mask-size:100% 100%;-webkit-mask-image:url('assets/button-bloom.svg');-webkit-mask-size:100% 100%}
+#shutter.is-blooming .button-bloom{animation:button-bloom 780ms cubic-bezier(.16,.68,.25,1) both}
+@keyframes button-bloom{0%{opacity:0;transform:translate(-50%,-50%) scale(.03) rotate(-12deg)}12%{opacity:1}72%{opacity:.95}100%{opacity:.68;transform:translate(-50%,-50%) scale(1) rotate(12deg)}}
 .camera-studio:is([data-state=loading],[data-state=error],[data-state=paused]) #shutter{opacity:.45}
-.camera-studio:is([data-state=painting],[data-state=settling],[data-state=review],[data-state=submitting],[data-state=submitted],[data-state=reopening],[data-state=returning]) .capture-controls{display:flex;justify-content:center;gap:48px}
+.camera-studio:is([data-state=review],[data-state=submitting],[data-state=submitted],[data-state=reopening],[data-state=returning]) .capture-controls{display:flex;justify-content:center;gap:48px}
 .camera-studio:is([data-state=submitting],[data-state=reopening],[data-state=returning]) .capture-controls{visibility:hidden}
-.camera-studio:is([data-state=painting],[data-state=settling]) #shutter{opacity:.78}
-.camera-studio[data-state=ready] .capture-controls{animation:controls-in .24s ease-out both}
+.camera-studio:is([data-state=ready],[data-state=review]) .capture-controls{animation:controls-in .18s ease-out both}
 @keyframes controls-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .camera-studio[data-state=submitted] .side-control:has(#submit){display:none}
 .instruction{height:40px;min-height:40px;font-size:12px;line-height:1.6;color:#68705f;margin-top:4px;text-align:center}
@@ -45,4 +48,4 @@ svg{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-l
 @media(max-width:600px){.topbar{padding:19px 22px 15px}.wordmark{font-size:24px}.camera-studio{padding:4px 18px max(24px,env(safe-area-inset-bottom))}.paper-camera{width:min(100%,calc((100svh - 278px)*.8))}.capture-controls{margin-top:17px;width:250px;gap:18px}.camera-message{padding:25px}}
 @media(max-height:650px) and (max-width:600px){.topbar{padding-top:14px;padding-bottom:10px}.paper-camera{width:min(100%,calc((100svh - 246px)*.8))}.capture-controls{margin-top:12px;grid-template-columns:1fr 70px 1fr;min-height:70px}#shutter{width:68px;height:68px}}
 @media(max-height:600px) and (min-width:601px){.topbar{padding-top:12px;padding-bottom:8px}.camera-studio{display:grid;grid-template-columns:auto 220px;grid-template-rows:1fr auto auto 1fr;justify-content:center;column-gap:30px;width:auto}.paper-camera{grid-column:1;grid-row:1/5;width:calc((100svh - 108px)*.8)}.capture-controls{grid-column:2;grid-row:2;align-self:center;width:220px;gap:10px;margin:0}.instruction{grid-column:2;grid-row:3;align-self:start;margin-top:14px}}
-@media(prefers-reduced-motion:reduce){button,.paper-camera{transition:none}.camera-studio[data-state=ready] .capture-controls{animation:none}}
+@media(prefers-reduced-motion:reduce){button,.paper-camera{transition:none}.camera-studio:is([data-state=ready],[data-state=review]) .capture-controls{animation:none}#shutter.is-blooming .button-bloom{animation:none;opacity:.68;transform:translate(-50%,-50%) scale(1)}}
