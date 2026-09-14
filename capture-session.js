@@ -1,6 +1,6 @@
 /** A single shutter click starts the automatic watercolor reveal. */
 export class CaptureSession {
-  constructor({ paintDuration = 2800, settleDuration = 0 } = {}) {
+  constructor({ paintDuration = 2000, settleDuration = 0 } = {}) {
     this.paintDuration = paintDuration; this.settleDuration = settleDuration;
     this.state = 'ready'; this.elapsed = 0;
   }

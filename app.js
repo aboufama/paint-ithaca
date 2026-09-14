@@ -1,4 +1,4 @@
-import TidalBloom from './tidal-bloom.js?v=combined-1';
+import TidalBloom from './tidal-bloom.js?v=quick-1';
 import { CaptureSession } from './capture-session.js';
 
 const $ = id => document.getElementById(id);
@@ -27,8 +27,8 @@ async function openCamera() {
   if (session.active || disposed) return;
   const token = ++generation; ready = false; shutter.disabled = true; stopCamera();
   painting?.dispose(); painting = null;
-  session.reset(); video.hidden = false; canvas.setAttribute('aria-hidden', 'true'); state('loading'); message('Allow camera access to begin.');
-  $('instruction').textContent = 'Find your little corner of Ithaca.';
+  session.reset(); video.hidden = false; canvas.setAttribute('aria-hidden', 'true'); state('loading'); message('Allow camera access.');
+  $('instruction').textContent = '';
   $('again').hidden = true; $('save').hidden = true; $('flip-camera').hidden = true;
   if (!navigator.mediaDevices?.getUserMedia) { state('error'); message('Open this page in Safari or Chrome to use your camera.', true); return; }
   try {
@@ -47,7 +47,6 @@ async function openCamera() {
       ready = false; shutter.disabled = true; state('error'); message('Your camera disconnected. Tap to reconnect.', true);
     }, { once: true });
     ready = true; state('ready'); message(''); shutter.disabled = false;
-    $('instruction').textContent = 'Tap to take a photo.';
     // Camera enumeration is optional; the shutter is ready before this resolves.
     navigator.mediaDevices.enumerateDevices?.().then(devices => {
       if (token === generation && ready) $('flip-camera').hidden = devices.filter(device => device.kind === 'videoinput').length < 2;
@@ -87,7 +86,7 @@ function capture() {
     state('error'); message('Couldn’t paint this photo. Tap to try again.', true); return false;
   }
   session.begin();
-  video.hidden = true; canvas.setAttribute('aria-hidden', 'false'); state('painting'); message(''); $('instruction').textContent = 'Let it bloom.';
+  video.hidden = true; canvas.setAttribute('aria-hidden', 'false'); state('painting'); message('');
   $('studio').style.setProperty('--progress', 0);
   beginRecorder(); renderedFrames = 1; lastFrame = null; schedule(); return true;
 }
@@ -134,7 +133,7 @@ function showReview() {
   if (session.state !== 'review' || disposed) return;
   state('review'); $('instruction').textContent = '';
   $('again').hidden = false; $('save').hidden = false;
-  $('save-label').textContent = recordedBlob ? 'Save film' : 'Save photo';
+  $('save').setAttribute('aria-label', recordedBlob ? 'Save film' : 'Save photo');
   completed.splice(0).forEach(resolve => resolve({ state: session.state, effect: TidalBloom.name, durationMs: session.elapsed, renderedFrames, recordedBytes: recordedBlob?.size || 0 }));
 }
 shutter.addEventListener('click', capture);

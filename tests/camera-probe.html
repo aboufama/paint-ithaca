@@ -1,6 +1,6 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=quick-1"></head><body>
 <script type="module">
-import TidalBloom from '../tidal-bloom.js?v=combined-1';
+import TidalBloom from '../tidal-bloom.js?v=quick-1';
 // Test only. This page is excluded from the published build and never opens a real camera.
 const sourceImage = new Image(); sourceImage.src = './fixtures/cayuga-lake.jpg'; await sourceImage.decode();
 const feed = document.createElement('canvas'); feed.width = 800; feed.height = 1000;
@@ -20,7 +20,7 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=combined-2');
+await import('../app.js?v=quick-1');
 function waitForState(name) { return new Promise(resolve=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const observer=new MutationObserver(()=>{if(element.dataset.state===name){observer.disconnect();resolve();}});observer.observe(element,{attributes:true,attributeFilter:['data-state']});

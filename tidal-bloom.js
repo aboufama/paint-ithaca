@@ -13,13 +13,13 @@ function noise(x, y) {
   return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
 }
 
-// Tidal's watercolor, Graphite's pencil, and Sunprint's developing edge share
-// one wet front. Every draw is a pure function of progress.
+// Graphite's pencil appears first, then Tidal's watercolor floods through
+// Sunprint's developing edge. Every draw is a pure function of progress.
 export default {
   id: '01',
   name: 'Tidal Bloom',
   description: 'Natural watercolor follows delicate pencil into a softly branching bloom.',
-  duration: 2800,
+  duration: 2000,
   create({ width, height, photo }) {
     const makeCanvas = (w = width, h = height) => {
       const canvas = document.createElement('canvas');
@@ -152,8 +152,8 @@ export default {
       pencil.clearRect(0, 0, width, height);
     }
 
-    // Sunprint's branching, softly serrated arrival field controls all three
-    // layers, so the pencil and capillary edge belong to the same growing wash.
+    // Sunprint's branching, softly serrated arrival field controls the color
+    // and capillary edge that wash over the quickly appearing pencil sketch.
     const maskPixels = mctx.createImageData(mw, mh);
     const sketchPixels = sctx.createImageData(mw, mh);
     const bathPixels = bctx.createImageData(mw, mh);
@@ -210,13 +210,14 @@ export default {
           ctx.restore();
           return;
         }
-        const exposure = 0.96 * (1 - Math.pow(1 - p, 1.32));
-        const opening = smooth(p / 0.06);
+        const colorTime = clamp((p - 0.05) / 0.95);
+        const exposure = 0.96 * (1 - Math.pow(1 - colorTime, 1.32));
+        const opening = smooth(colorTime / 0.06);
+        const sketch = smooth(p / 0.07);
         const drying = 1 - smooth((p - 0.82) / 0.18);
         for (let i = 0; i < arrival.length; i++) {
           const age = exposure - arrival[i];
           const color = smooth((age + 0.004) / 0.16) * opening;
-          const sketch = smooth((age + 0.065) / 0.1) * opening;
           const halo = smooth((age + 0.072) / 0.09) * (1 - smooth((age - 0.02) / 0.21));
           maskPixels.data[i * 4 + 3] = color * 255;
           sketchPixels.data[i * 4 + 3] = sketch * 145;
@@ -227,7 +228,7 @@ export default {
         bctx.putImageData(bathPixels, 0, 0);
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(bath, 0, 0, width, height);
-        // Fine pencil reaches the damp edge first, then sinks beneath the
+        // The full pencil sketch appears in 140 ms, then sinks beneath the
         // watercolor; a much softer trace remains baked into the final image.
         reveal(ctx, graphite, sketchMask);
         reveal(ctx, painted, mask);

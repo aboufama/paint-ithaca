@@ -2,11 +2,11 @@
 
 **[Open the camera](https://aboufama.github.io/paint-ithaca/)**
 
-Point your phone. Tap the shutter. Your photo blooms into watercolor in 2.8 seconds.
+Point your phone. Tap the shutter. A pencil sketch appears almost immediately, then color floods in over 2.0 seconds.
 
 Tidal Bloom is the camera’s single effect, combining its watercolor wash with light pencil detail from Graphite Blooms and the developing edge of Prussian Sunprint. A feathery wash spreads from one point with an irregular, softly branching edge, revealing the photo’s natural colors and subtle graphite contours. There is no blue sunprint tint. The comparison gallery and other effects have been removed; its old link redirects to the camera.
 
-The page requests the rear camera on startup. One tap captures the visible frame, stops the camera, and starts the painting. Retake reopens the camera. Save downloads the animated film, or a PNG when recording is unavailable. There are no pause buttons or sample photos in the camera flow. Photos stay on the device; the existing backend is untouched.
+The page requests the rear camera on startup. One tap captures the visible frame, stops the camera, and starts the painting. Retake reopens the camera. Save downloads the animated film, or a PNG when recording is unavailable. The interface keeps only the wordmark, action labels and necessary camera permission or error messages. There are no pause buttons or sample photos in the camera flow. Photos stay on the device; the existing backend is untouched.
 
 ## Run and deploy
 
@@ -23,7 +23,7 @@ No dependencies to install. Python 3 serves the preview; Node 22+ runs the tests
 
 `app.js` copies the current video frame exactly once, preserving the preview crop and front-camera mirroring. It closes camera tracks immediately and paints only that frozen image. Duplicate taps are ignored. Switching away pauses the animation and recording; a live camera preview is closed and offers reconnection on return.
 
-`tidal-bloom.js` uses Canvas2D, precomputed paper grain, a lightly simplified photo, and a feathered moving mask based on Prussian Sunprint’s developing exposure field. Pencil contours from Graphite Blooms add a restrained sketch layer. The original Tidal Bloom, Graphite Blooms, and Prussian Sunprint drafts were independently authored by the `effect_01`, `effect_09`, and `effect_06` agents. Their selected elements now form one renderer. `capture-session.js` drives its 2.8-second reveal; each new capture starts from clean paper.
+`tidal-bloom.js` uses Canvas2D, precomputed paper grain, a lightly simplified photo, and a feathered moving mask based on Prussian Sunprint’s developing exposure field. Pencil contours from Graphite Blooms appear across the photo in 140 milliseconds, then recede beneath the incoming color. The original Tidal Bloom, Graphite Blooms, and Prussian Sunprint drafts were independently authored by the `effect_01`, `effect_09`, and `effect_06` agents. Their selected elements now form one renderer. `capture-session.js` drives its 2.0-second reveal; each new capture starts from clean paper.
 
 ## Verification
 
