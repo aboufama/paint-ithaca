@@ -4,6 +4,7 @@ import { CaptureSession } from './capture-session.js';
 
 const $ = id => document.getElementById(id);
 const video = $('source-video'), canvas = $('painting'), shutter = $('shutter');
+video.controls = false; video.disablePictureInPicture = true; video.disableRemotePlayback = true;
 const source = document.createElement('canvas'); source.width = 800; source.height = 1000;
 const sourceContext = source.getContext('2d', { alpha: false });
 const bloom = new Bloom(), session = new CaptureSession();
@@ -12,7 +13,7 @@ let raf = 0, lastFrame = null, accumulator = 0, lastMaskFrame = 0, disposed = fa
 let recorder, recordingStream, recordedBlob, chunks = [], downloadUrl;
 const completed = [];
 
-function state(value) { $('studio').dataset.state = value; }
+function state(value) { $('studio').dataset.state = value; shutter.hidden = ['painting','settling','finishing','review'].includes(value); }
 function message(text, retry = false) {
   $('message-text').textContent = text; $('camera-message').hidden = !text; $('retry-camera').hidden = !retry;
 }

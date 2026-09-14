@@ -33,6 +33,8 @@ async function checkCapture() {
   assert(snapshotCount===0,'Photo captured before clicking');
   shutter.click();shutter.click();
   assert(snapshotCount===1,'Shutter must copy exactly one frozen frame');
+  assert(shutter.hidden,'Capture control should disappear during painting');
+  assert(!document.getElementById('source-video').controls,'Native pause controls must not be offered');
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop after snapshot');
   clearInterval(feedTimer); context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000); // later feed must not replace the captured image
   await waitForState('review');

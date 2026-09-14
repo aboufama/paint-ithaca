@@ -14,10 +14,10 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <header class="topbar"><a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a></header>
+  <header class="topbar"><a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a><a class="studies-link" href="effects/">Explore 10 effects ↗</a></header>
   <main class="camera-studio" data-state="loading" id="studio" aria-label="Watercolor camera">
     <div class="paper-camera" id="viewfinder">
-      <video id="source-video" autoplay muted playsinline aria-label="Live camera preview"></video>
+      <video id="source-video" autoplay muted playsinline disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" aria-label="Live camera preview"></video>
       <canvas id="painting" aria-hidden="true" aria-label="Your photo blooming into watercolor"></canvas>
       <div class="camera-message" id="camera-message"><svg class="camera-outline" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 1-2h6l1 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="4"/></svg><p id="message-text">Allow camera access to begin.</p><button id="retry-camera" hidden>Open camera</button></div>
     </div>
