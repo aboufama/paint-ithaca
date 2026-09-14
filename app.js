@@ -15,19 +15,25 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let painting, scene, stream, ready = false, generation = 0, facing = 'environment', mirrored = false;
 let raf = 0, previewRaf = 0, previewTime = 0, lastFrame = null, renderedFrames = 0, disposed = false;
 let submission = 'idle', submissionElapsed = 0, mosaicPromise, restoreSubmitFocus = false;
+let cameraTransitions = [];
 const submissionDuration = 2200, completed = [];
 
 function state(value) {
   $('studio').dataset.state = value;
-  shutter.hidden = ['painting','settling','review','submitting','submitted'].includes(value);
-  preview.setAttribute('aria-hidden', String(value !== 'ready'));
+  shutter.hidden = ['review','submitting','submitted','reopening','returning'].includes(value);
+  shutter.setAttribute('aria-label', ['painting','settling'].includes(value) ? 'Painting photo' : 'Take photo');
+  preview.setAttribute('aria-hidden', String(!['ready','returning'].includes(value)));
 }
 function message(text, retry = false) {
   $('message-text').textContent = text; $('camera-message').hidden = !text; $('retry-camera').hidden = !retry;
 }
 function stopCamera() {
+  cancelCameraTransitions();
   cancelAnimationFrame(previewRaf); previewRaf = 0;
   stream?.getTracks().forEach(track => track.stop()); stream = null; video.srcObject = null;
+}
+function cancelCameraTransitions() {
+  cameraTransitions.forEach(animation => animation.cancel()); cameraTransitions = [];
 }
 function cancelFrame() { cancelAnimationFrame(raf); raf = 0; lastFrame = null; }
 function schedule() { if (!raf && !document.hidden && (session.active || submission === 'joining') && !disposed) raf = requestAnimationFrame(frame); }
@@ -63,10 +69,12 @@ async function loadMosaicImages() {
 }
 
 async function openCamera() {
-  if (session.active || ['preparing','joining'].includes(submission) || disposed) return;
+  if (session.active || ['preparing','joining'].includes(submission) || ['reopening','returning'].includes($('studio').dataset.state) || disposed) return;
+  const returning = ['review','submitted'].includes($('studio').dataset.state);
+  const focusShutter = $('again').matches(':focus-visible');
   const token = ++generation; ready = false; shutter.disabled = true; stopCamera();
   painting?.dispose(); painting = null; scene?.dispose(); scene = null; submission = 'idle';
-  session.reset(); canvas.setAttribute('aria-label', 'Your photo blooming into watercolor'); canvas.setAttribute('aria-hidden', 'true'); state('loading'); message('Allow camera access.');
+  session.reset(); canvas.setAttribute('aria-hidden', String(!returning)); state(returning ? 'reopening' : 'loading'); message(returning ? '' : 'Allow camera access.');
   $('instruction').textContent = ''; $('studio').removeAttribute('aria-busy');
   $('again-label').textContent = 'Retake'; $('again').hidden = true; $('submit').hidden = true; $('submit').disabled = false; $('flip-camera').hidden = true;
   if (!navigator.mediaDevices?.getUserMedia) { state('error'); message('Open this page in Safari or Chrome to use your camera.', true); return; }
@@ -85,8 +93,22 @@ async function openCamera() {
       ready = false; stopCamera(); shutter.disabled = true; state('error'); message('Your camera disconnected. Tap to reconnect.', true);
     }, { once: true });
     copyVideo(previewContext, preview);
-    ready = true; state('ready'); message(''); shutter.disabled = false;
+    ready = true; message('');
     previewTime = performance.now(); previewRaf = requestAnimationFrame(previewFrame);
+    if (returning && !reduceMotion.matches) {
+      state('returning');
+      const timing = { duration: 420, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'both' };
+      cameraTransitions = [
+        canvas.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.025)' }], timing),
+        preview.animate([{ opacity: 0, transform: 'scale(.985)' }, { opacity: 1, transform: 'scale(1)' }], timing)
+      ];
+      await Promise.all(cameraTransitions.map(animation => animation.finished.catch(() => {})));
+      if (token !== generation || disposed || !ready) return;
+    }
+    state('ready'); canvas.setAttribute('aria-hidden', 'true');
+    canvas.setAttribute('aria-label', 'Your photo blooming into watercolor');
+    cancelCameraTransitions(); shutter.disabled = false;
+    if (returning && focusShutter) shutter.focus({ preventScroll: true });
     void loadMosaicImages();
     navigator.mediaDevices.enumerateDevices?.().then(devices => {
       if (token === generation && ready) $('flip-camera').hidden = devices.filter(device => device.kind === 'videoinput').length < 2;
@@ -145,8 +167,8 @@ async function submitPhoto() {
   restoreSubmitFocus = $('submit').matches(':focus-visible');
   submission = 'preparing'; state('submitting'); $('studio').setAttribute('aria-busy', 'true');
   $('submit').disabled = true; $('submit').hidden = true; $('again').hidden = true;
-  canvas.setAttribute('aria-label', 'Your photo joining a shared reconstruction preview');
-  $('instruction').textContent = 'Reconstruction preview';
+  canvas.setAttribute('aria-label', 'Your photo joining the shared collection');
+  $('instruction').textContent = '';
   try {
     const images = await loadMosaicImages();
     if (disposed) return;
@@ -175,7 +197,7 @@ $('flip-camera').addEventListener('click', () => { facing = facing === 'environm
 $('submit').addEventListener('click', submitPhoto);
 function suspend() {
   ++generation; cancelFrame(); stopCamera();
-  if (ready || $('studio').dataset.state === 'loading') {
+  if (ready || ['loading','reopening','returning'].includes($('studio').dataset.state)) {
     ready = false; shutter.disabled = true; $('flip-camera').hidden = true; state('paused'); message('Tap to reopen your camera.', true);
   }
 }

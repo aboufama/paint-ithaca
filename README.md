@@ -6,7 +6,7 @@ Point your phone. Tap the shutter. A pencil sketch appears almost immediately, t
 
 Tidal Bloom is the camera’s single effect, combining its watercolor wash with light pencil detail from Graphite Blooms and the developing edge of Prussian Sunprint. A feathery wash spreads from one point with an irregular, softly branching edge, revealing the photo’s natural colors and subtle graphite contours. There is no blue sunprint tint. The comparison gallery and other effects have been removed; its old link redirects to the camera.
 
-The page requests the rear camera on startup. One tap captures the visible frame, stops the camera, and starts the painting. Retake reopens the camera. Submit gently shrinks the painting into an array of other Ithaca photographs, with fine points suggesting the shared 3D reconstruction. Capture another returns to the camera. This is an explicitly labelled local submission preview; no upload API is connected. The interface keeps only the wordmark, action labels and necessary camera permission or error messages. There are no pause buttons or sample photos in the camera flow. Photos stay on the device; the existing backend is untouched.
+The page requests the rear camera on startup. One tap captures the visible frame, stops the camera, and starts the painting. Retake reopens the camera. Submit gently shrinks the painting into an array of other Ithaca photographs, with fine points suggesting the shared 3D reconstruction. Capture another holds the mosaic while the camera reconnects, then crossfades into the live view. This is an explicitly labelled local submission preview; no upload API is connected. The interface keeps only the wordmark, action labels and necessary camera permission or error messages. There are no pause buttons or sample photos in the camera flow. Photos stay on the device; the existing backend is untouched.
 
 ## Run and deploy
 
@@ -21,7 +21,7 @@ No dependencies to install. Python 3 serves the preview; Node 22+ runs the tests
 
 ## Implementation
 
-`app.js` copies the current video frame exactly once, preserving the preview crop and front-camera mirroring. It closes camera tracks immediately and paints only that frozen image. Duplicate taps are ignored. The live preview is drawn into a canvas, so native video play/pause overlays cannot cover it. Switching away pauses animation; a live camera preview is closed and offers reconnection on return.
+`app.js` copies the current video frame exactly once, preserving the preview crop and front-camera mirroring. It closes camera tracks immediately and paints only that frozen image. The camera icon remains visible and disabled throughout painting, then gives way to Retake and Submit. Duplicate taps are ignored. The live preview is drawn into a canvas, so native video play/pause overlays cannot cover it. Switching away pauses animation; a live camera preview is closed and offers reconnection on return.
 
 `tidal-bloom.js` uses Canvas2D, precomputed paper grain, a lightly simplified photo, and a feathered moving mask based on Prussian Sunprint’s developing exposure field. Pencil contours from Graphite Blooms appear across the photo in 140 milliseconds, then recede beneath the incoming color. The original Tidal Bloom, Graphite Blooms, and Prussian Sunprint drafts were independently authored by the `effect_01`, `effect_09`, and `effect_06` agents. Their selected elements now form one renderer. `capture-session.js` drives its 2.0-second reveal; each new capture starts from clean paper.
 

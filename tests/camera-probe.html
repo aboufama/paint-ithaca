@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=submit-2"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=flow-2"></head><body>
 <script type="module">
 import TidalBloom from '../tidal-bloom.js?v=quick-1';
 import { SubmissionScene } from '../submission-scene.js?v=submit-2';
@@ -44,13 +44,18 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=thanks-1');
+await import('../app.js?v=flow-1');
 function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
   const observer=new MutationObserver(()=>{if(element.dataset.state===name){clearTimeout(timeout);observer.disconnect();resolve();}});observer.observe(element,{attributes:true,attributeFilter:['data-state']});
 }); }
 function assert(condition,text) { if(!condition)throw new Error(text); }
+function assertPaintingShutter() {
+  const shutter=document.getElementById('shutter'),style=getComputedStyle(shutter);
+  assert(!shutter.hidden&&shutter.disabled,'Shutter must remain visible but disabled during painting');
+  assert(style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>0,'Painting must not visually hide the shutter');
+}
 function assertFrozenSource() {
   assert(snapshotCanvas.width===snapshotPixels.width&&snapshotCanvas.height===snapshotPixels.height,'Frozen source dimensions changed after capture');
   const currentSnapshot=snapshotCanvas.getContext('2d').getImageData(0,0,snapshotCanvas.width,snapshotCanvas.height).data;
@@ -99,11 +104,12 @@ async function checkCapture() {
   assert(snapshotCount===0,'Photo captured before clicking');
   shutter.click();shutter.click();
   assert(snapshotCount===1,'Shutter must copy exactly one frozen frame');
-  assert(shutter.hidden,'Capture control should disappear during painting');
+  assertPaintingShutter();
   assert(!document.getElementById('source-video').controls,'Native pause controls must not be offered');
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop after snapshot');
   clearInterval(feedTimer); context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000); // later feed must not replace the captured image
   await waitForState('review');
+  assert(shutter.hidden,'Shutter should hide when Retake and Submit become available');
   assert(snapshotCount===1,'Animation read the camera after the snapshot');
   assert(requests===1,'Animation restarted camera');
   const canvas=document.getElementById('painting'),paintingContext=canvas.getContext('2d');
@@ -127,10 +133,12 @@ async function checkRetake() {
   assert(requests===2,'Retake must open a fresh camera stream');
   assertCanvasPreview();
   document.getElementById('shutter').click();
+  assertPaintingShutter();
   const canvas=document.getElementById('painting'),paintingContext=canvas.getContext('2d');
   const pixel=paintingContext.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
   assert(pixel[0]>230&&pixel[1]>225&&pixel[2]>210&&pixel[3]===255,'Retake flashed the old completed image before the bloom');
   clearInterval(feedTimer);await waitForState('review');
+  assert(document.getElementById('shutter').hidden,'Retake should hide the shutter once review actions appear');
   assert(snapshotCount===2,'Retake must capture exactly one new photo');
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Retake camera was not stopped');
   const selectedEffect=assertTidalBloomFinish(canvas,paintingContext.getImageData(0,0,canvas.width,canvas.height).data);
@@ -164,19 +172,41 @@ async function checkSubmit() {
 async function checkAfterSubmit() {
   const studio=document.getElementById('studio');
   assert(studio.dataset.state==='submitted','Run Submit checks before Capture another');
-  const priorPreviewFrames=previewFrames;
-  document.getElementById('again').click();
-  assert(document.getElementById('painting').getAttribute('aria-hidden')==='true','New camera must hide the completed collection');
-  assert(document.getElementById('instruction').textContent==='','New camera must clear completion text');
-  assert(document.getElementById('submit').hidden,'New camera must hide the old Submit action');
-  await waitForState('ready');
+  const priorPreviewFrames=previewFrames,viewfinder=document.getElementById('viewfinder');
+  const priorBounds=viewfinder.getBoundingClientRect(),observedStates=[];
+  const rememberState=value=>{if(value&&observedStates.at(-1)!==value)observedStates.push(value);};
+  const observer=new MutationObserver(records=>{
+    records.forEach(record=>rememberState(record.oldValue));
+    rememberState(studio.dataset.state);
+  });
+  observer.observe(studio,{attributes:true,attributeFilter:['data-state'],attributeOldValue:true});
+  try {
+    document.getElementById('again').click();
+    assert(studio.dataset.state==='reopening','Capture another should retain the mosaic while reopening the camera');
+    const painting=document.getElementById('painting'),paintingStyle=getComputedStyle(painting);
+    assert(painting.getAttribute('aria-hidden')==='false','Completed collection must remain available while camera reopens');
+    assert(paintingStyle.display!=='none'&&paintingStyle.visibility!=='hidden'&&Number(paintingStyle.opacity)>0,'Completed collection must remain visible while camera reopens');
+    assert(document.getElementById('camera-message').hidden,'Camera reopening must not cover the collection with a loading message');
+    assert(document.getElementById('shutter').disabled,'Shutter must wait for the returning live preview');
+    assert(document.getElementById('instruction').textContent==='','New camera must clear completion text');
+    assert(document.getElementById('submit').hidden,'New camera must hide the old Submit action');
+    await waitForState('ready');
+    rememberState(studio.dataset.state);
+  } finally {observer.disconnect();}
+  assert(observedStates.includes('returning')||matchMedia('(prefers-reduced-motion: reduce)').matches,'Camera should crossfade through the returning state before becoming ready');
+  assert(document.getElementById('painting').getAttribute('aria-hidden')==='true','Ready camera should hide the completed collection from accessibility');
+  const readyBounds=viewfinder.getBoundingClientRect(),boundsDelta={};
+  for(const key of ['x','y','width','height']) {
+    boundsDelta[key]=Math.abs(readyBounds[key]-priorBounds[key]);
+    assert(boundsDelta[key]<=1,`Viewfinder ${key} moved by ${boundsDelta[key]}px when returning to the camera`);
+  }
   assert(requests===3,'Capture another should open exactly one new camera stream');
   assert(snapshotCount===2,'Capture another should wait for the next shutter click');
   assert(previewFrames>priorPreviewFrames,'New camera should replace the collection with a fresh live preview');
   assert(cameraStream.getTracks().every(track=>track.readyState==='live'),'New camera stream must be live');
   assert(!document.getElementById('shutter').hidden&&!document.getElementById('shutter').disabled,'New capture must enable the shutter');
   assertCanvasPreview();
-  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,clearedSubmission:true,cameraReady:true};
+  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,observedStates,boundsDelta,collectionRetainedWhileReopening:true,clearedSubmission:true,cameraReady:true};
 }
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_retake_checks',description:'After the capture check, verify Retake opens a fresh synthetic camera and starts from clean paper. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkRetake});
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_capture_checks',description:'Run the complete shutter and watercolor flow against a synthetic video feed. Does not access a physical camera.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkCapture});

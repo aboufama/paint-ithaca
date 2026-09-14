@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Fraunces:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=submit-2">
-  <script type="module" src="app.js?v=thanks-1"></script>
+  <link rel="stylesheet" href="styles.css?v=flow-2">
+  <script type="module" src="app.js?v=flow-1"></script>
 </head>
 <body>
   <header class="topbar"><a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a></header>
@@ -20,6 +20,7 @@
       <video id="source-video" autoplay muted playsinline disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback" aria-hidden="true" tabindex="-1"></video>
       <canvas id="camera-preview" aria-label="Live camera preview" aria-hidden="true"></canvas>
       <canvas id="painting" aria-hidden="true" aria-label="Your photo blooming into watercolor"></canvas>
+      <a class="photo-credits" href="assets/mosaic/credits.html" aria-label="Image sources"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg></a>
       <div class="camera-message" id="camera-message"><svg class="camera-outline" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 1-2h6l1 2h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="4"/></svg><p id="message-text">Allow camera access.</p><button id="retry-camera" hidden>Open camera</button></div>
     </div>
     <div class="capture-controls">
@@ -28,7 +29,6 @@
       <div class="side-control"><button id="submit" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5"/></svg><span>Submit</span></button></div>
     </div>
     <p id="instruction" class="instruction" role="status"></p>
-    <a class="photo-credits" href="assets/mosaic/credits.html">Photo credits</a>
   </main>
 </body>
 </html>
