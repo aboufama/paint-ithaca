@@ -1,11 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
   <defs>
-    <filter id="bleed" x="-25%" y="-25%" width="150%" height="150%">
+    <filter id="bleed" filterUnits="userSpaceOnUse" x="0" y="0" width="180" height="180" color-interpolation-filters="sRGB">
       <feTurbulence type="fractalNoise" baseFrequency=".075" numOctaves="3" seed="14" result="grain"/>
-      <feDisplacementMap in="SourceGraphic" in2="grain" scale="15" xChannelSelector="R" yChannelSelector="G"/>
-      <feGaussianBlur stdDeviation=".6"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale="15" xChannelSelector="R" yChannelSelector="G" result="pigment"/>
+      <feGaussianBlur in="pigment" stdDeviation=".6"/>
     </filter>
-    <radialGradient id="wash"><stop offset=".62" stop-color="white"/><stop offset=".89" stop-color="white" stop-opacity=".75"/><stop offset="1" stop-color="white" stop-opacity="0"/></radialGradient>
+    <radialGradient id="lilac" gradientUnits="userSpaceOnUse" cx="79" cy="101" r="101">
+      <stop stop-color="#b4a1be" stop-opacity=".5"/>
+      <stop offset=".55" stop-color="#c2adcd" stop-opacity=".33"/>
+      <stop offset="1" stop-color="#c2adcd" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="olive" gradientUnits="userSpaceOnUse" cx="117" cy="117" r="99">
+      <stop stop-color="#8a9b71" stop-opacity=".44"/>
+      <stop offset=".49" stop-color="#acb794" stop-opacity=".47"/>
+      <stop offset="1" stop-color="#acb794" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="warm" gradientUnits="userSpaceOnUse" cx="65" cy="58" r="83">
+      <stop stop-color="#c59267" stop-opacity=".4"/>
+      <stop offset=".44" stop-color="#cbb184" stop-opacity=".33"/>
+      <stop offset="1" stop-color="#cbb184" stop-opacity="0"/>
+    </radialGradient>
+    <path id="wash-shape" d="M90 10C109 7 115 23 131 30S164 44 162 66 173 100 155 117 141 149 120 153 90 170 72 155 36 154 30 132 9 104 18 85 14 51 36 42 67 13 90 10Z"/>
   </defs>
-  <path fill="url(#wash)" filter="url(#bleed)" d="M90 10C109 7 115 23 131 30S164 44 162 66 173 100 155 117 141 149 120 153 90 170 72 155 36 154 30 132 9 104 18 85 14 51 36 42 67 13 90 10Z"/>
+  <!-- Only colored paths produce output; the turbulence field never paints a box. -->
+  <g filter="url(#bleed)">
+    <use href="#wash-shape" fill="url(#lilac)"/>
+    <use href="#wash-shape" fill="url(#olive)"/>
+    <use href="#wash-shape" fill="url(#warm)"/>
+  </g>
 </svg>

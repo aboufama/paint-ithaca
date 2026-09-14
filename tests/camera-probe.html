@@ -1,13 +1,13 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=controls-3"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=clip-4"></head><body>
 <script type="module">
-import TidalBloom from '../tidal-bloom.js?v=capture-2';
+import TidalBloom from '../tidal-bloom.js?v=clip-4';
 import { SubmissionScene } from '../submission-scene.js?v=submit-2';
 // Test only. This page is excluded from the published build and never opens a real camera.
 const sourceImage = new Image(); sourceImage.src = './fixtures/cayuga-lake.jpg'; await sourceImage.decode();
 const feed = document.createElement('canvas'); feed.width = 800; feed.height = 1000;
 const context = feed.getContext('2d');
 context.drawImage(sourceImage,192,0,576,720,0,0,800,1000);
-let feedTimer;
+let feedTimer,cameraRequestGate;
 let requests = 0, cameraStream, snapshotCount = 0, previewFrames = 0, snapshotPixels, snapshotCanvas, requestOptions;
 let scenePreparations = 0, sceneFinals = 0, mosaicImages = 0, mosaicTiles = 0, submissionStartPixels, exactSubmissionStart = false;
 const rendererPreparations=[];
@@ -43,7 +43,7 @@ SubmissionScene.prototype.draw = function(progress) {
   if (progress === 1) sceneFinals++;
 };
 Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{
-  async getUserMedia(options) { requests++; requestOptions = options; context.drawImage(sourceImage,192,0,576,720,0,0,800,1000); cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
+  async getUserMedia(options) { requests++; requestOptions = options; if(cameraRequestGate)await cameraRequestGate; context.drawImage(sourceImage,192,0,576,720,0,0,800,1000); cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
   async enumerateDevices() { return [{kind:'videoinput',deviceId:'fixture-camera-back'},{kind:'videoinput',deviceId:'fixture-camera-front'}]; }
 }});
 const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
@@ -54,8 +54,9 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
   return result;
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
+for(const image of html.querySelectorAll('img[src]'))image.src=new URL(image.getAttribute('src'),new URL('../index.html',location.href)).href;
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=controls-3');
+await import('../app.js?v=clip-4');
 function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
@@ -126,6 +127,29 @@ async function assertControlEntrance(elements,label,duration) {
   elements.forEach(element=>assert(effectiveOpacity(element)>.99,`${label} must finish fully visible`));
   return {items:elements.length,durationMs:duration};
 }
+async function assertButtonInk() {
+  const shutter=document.getElementById('shutter'),ink=shutter.querySelector('.button-ink'),art=shutter.querySelector('.button-bloom');
+  assert(ink&&art instanceof HTMLImageElement&&ink.contains(art),'Button bloom must be an image inside a dedicated ink clip');
+  await art.decode();
+  const inkStyle=getComputedStyle(ink),artStyle=getComputedStyle(art),bounds=ink.getBoundingClientRect();
+  assert(['hidden','clip'].includes(inkStyle.overflow),'The dedicated ink layer must clip its animated artwork');
+  assert(Math.abs(bounds.width-bounds.height)<=1,'Ink clipping layer must remain circular');
+  const radius=inkStyle.borderTopLeftRadius;
+  const radiusPixels=radius.includes('%')?parseFloat(radius)*bounds.width/100:parseFloat(radius);
+  assert(radiusPixels>=bounds.width/2-1,'Ink clipping layer must have a full circular radius');
+  assert(ink.getAnimations().length===0,'Circular ink clip must stay static while the artwork animates');
+  for(const style of [inkStyle,artStyle])assert(style.maskImage==='none'&&(!style.webkitMaskImage||style.webkitMaskImage==='none'),'Button ink must not depend on a CSS mask');
+  const sample=document.createElement('canvas');sample.width=sample.height=128;
+  const context=sample.getContext('2d',{willReadFrequently:true});context.drawImage(art,0,0,128,128);
+  const pixels=context.getImageData(0,0,128,128).data;
+  let transparent=0,colored=0;
+  for(let i=3;i<pixels.length;i+=4){if(pixels[i]===0)transparent++;if(pixels[i]>16)colored++;}
+  const corners=[0,127,127*128,128*128-1];
+  assert(corners.every(index=>pixels[index*4+3]<8),'Button artwork corners must be transparent, with no rectangular background');
+  assert(transparent>128*128*.1&&colored>128*128*.1,'Button artwork needs both transparent surround and visible pigment');
+  sample.width=sample.height=0;
+  return {transparentImage:true,circularStaticClip:true,noCssMask:true,transparentPixels:transparent,pigmentPixels:colored};
+}
 async function verifyCrossfadeVisibilityPause(animation) {
   const hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');
   try {
@@ -145,12 +169,13 @@ async function verifyCrossfadeVisibilityPause(animation) {
 }
 async function captureThroughReview(expectedSnapshots) {
   await waitForFlipReady();
+  const inkCheck=await assertButtonInk();
   const studio=document.getElementById('studio'),shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
   const canvas=document.getElementById('painting'),preview=document.getElementById('camera-preview');
   const buttonBloom=shutter.querySelector('.button-bloom');
   assert(buttonBloom&&Number(getComputedStyle(buttonBloom).opacity)<.01,'Ready camera must reset the internal button bloom to transparent');
   const bounds=captureBounds(),priorRequests=requests,priorPreparations=rendererPreparations.length;
-  const states=[],paintingOpacities=[],bloomProgress=[],exitSamples=[];
+  const states=[],paintingOpacities=[],bloomProgress=[],bloomSamples=[],exitSamples=[];
   let bloomAnimation,pressAnimation,bloomStartTime,reviewingStarted,reviewStarted,exitAnimations;
   let failure=null,frameId=0,paintingFrames=0,preparingFrames=0,firstPaintingCheck=false,pauseCheck,visibilityPauseVerified=false;
   const inspect=()=>{
@@ -159,7 +184,10 @@ async function captureThroughReview(expectedSnapshots) {
       if(states.at(-1)!==value)states.push(value);
       if(bloomAnimation) {
         const progress=bloomAnimation.effect.getComputedTiming().progress;
-        if(progress!==null)bloomProgress.push(progress);
+        if(progress!==null) {
+          bloomProgress.push(progress);
+          if(bloomSamples.length<80)bloomSamples.push({wallTimeMs:performance.now()-captureStarted,animationTimeMs:Number(bloomAnimation.currentTime),progress,state:value});
+        }
       }
       if(['preparing','painting','reviewing'].includes(value)) {
         assertCaptureControls(bounds,value==='reviewing');
@@ -170,7 +198,7 @@ async function captureThroughReview(expectedSnapshots) {
           reviewingStarted=performance.now();
           exitAnimations=[opacityAnimation(shutter),opacityAnimation(flip)];
           assert(exitAnimations.every(Boolean),'Camera and Flip must each have their own exit animation');
-          exitAnimations.forEach(animation=>assert(Math.abs(Number(animation.effect.getTiming().duration)-300)<=1,'Each capture control should fade out over 300ms'));
+          exitAnimations.forEach(animation=>assert(Math.abs(Number(animation.effect.getTiming().duration)-140)<=1,'Each capture control should fade out over 140ms'));
         }
         const sample={timeMs:performance.now()-reviewingStarted,camera:effectiveOpacity(shutter),flip:effectiveOpacity(flip)};
         const prior=exitSamples.at(-1);
@@ -200,9 +228,9 @@ async function captureThroughReview(expectedSnapshots) {
     if(!['review','error'].includes(studio.dataset.state))frameId=requestAnimationFrame(tick);
   };
   frameId=requestAnimationFrame(tick);
-  let clickReturnMs,reviewEntrance;
+  let clickReturnMs,reviewEntrance,captureStarted,initialPixelChecksMs,synchronousChecksMs;
   try {
-    const started=performance.now();shutter.click();shutter.click();clickReturnMs=performance.now()-started;
+    const started=performance.now();captureStarted=started;shutter.click();shutter.click();clickReturnMs=performance.now()-started;
     const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
     if(!reduced) {
       bloomAnimation=opacityAnimation(buttonBloom);
@@ -218,7 +246,9 @@ async function captureThroughReview(expectedSnapshots) {
     assert(clickReturnMs<200,`Shutter blocked the interface for ${clickReturnMs.toFixed(1)}ms`);
     assert(studio.dataset.state==='preparing','Capture must return immediately in the asynchronous preparing state');
     assert(snapshotCount===expectedSnapshots,'Double capture must copy one immutable camera frame');
+    const pixelChecksStarted=performance.now();
     assertSnapshotOn(canvas,'Initial painting surface');assertSnapshotOn(preview,'Initial frozen preview');
+    initialPixelChecksMs=performance.now()-pixelChecksStarted;
     assert(Number(getComputedStyle(canvas).opacity)>0||Number(getComputedStyle(preview).opacity)>0,'The captured photograph must remain visible during preparation');
     assertCaptureControls(bounds);
     assert(buttonBloom,'Camera button must contain its internal bloom surface');
@@ -228,6 +258,7 @@ async function captureThroughReview(expectedSnapshots) {
     flip.click();assert(requests===priorRequests,'Disabled Flip must not reopen the camera during preparation');
     assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera tracks must stop immediately after capture');
     clearInterval(feedTimer);context.fillStyle='#ff00ff';context.fillRect(0,0,800,1000);
+    synchronousChecksMs=performance.now()-started;
     inspect();await waitForState('review');if(pauseCheck)await pauseCheck;inspect();
     reviewEntrance=await assertControlEntrance([document.getElementById('again'),document.getElementById('submit')],'Review actions',180);
   } finally {observer.disconnect();cancelAnimationFrame(frameId);}
@@ -242,17 +273,18 @@ async function captureThroughReview(expectedSnapshots) {
   assert(reduced||paintingOpacities.some(opacity=>opacity>0&&opacity<1),'Watercolor must crossfade over the frozen photograph');
   assert(reduced||visibilityPauseVerified,'Capture must verify mid-crossfade page hiding and resuming');
   if(!reduced) {
-    assert(bloomProgress.some(progress=>progress>.1&&progress<.9),'Button bloom must visibly progress through intermediate frames');
+    assert(bloomProgress.some(progress=>progress>.1&&progress<.9),`Button bloom must visibly progress through intermediate frames: ${JSON.stringify({clickReturnMs,initialPixelChecksMs,synchronousChecksMs,preparation,bloomSamples})}`);
     const bloomDuration=Number(bloomAnimation.effect.getTiming().duration);
+    assert(bloomDuration===560,'Button color bloom should complete in 560ms');
     assert(bloomAnimation.playState==='finished'&&Number(bloomAnimation.currentTime)>=bloomDuration,'Button bloom must reach its completed frame before review');
     const midSamples=exitSamples.filter(sample=>sample.camera>.08&&sample.camera<.92&&sample.flip>.08&&sample.flip<.92);
-    assert(midSamples.length>=3&&new Set(midSamples.map(sample=>sample.camera.toFixed(2))).size>=3,'Capture controls need multiple distinct mid-opacity frames rather than a flash');
+    assert(midSamples.length>=2&&new Set(midSamples.map(sample=>sample.camera.toFixed(2))).size>=2,'Capture controls need multiple distinct mid-opacity frames rather than a flash');
     assert(exitSamples[0].camera>.9&&exitSamples[0].flip>.9,'Capture control exit must begin fully visible');
-    assert(exitSamples.at(-1).camera<.12&&exitSamples.at(-1).flip<.12,'Capture controls must fade nearly transparent before being hidden');
-    assert(reviewStarted-reviewingStarted>=250,'Review actions must wait for the complete capture control fade');
+    assert(exitSamples.at(-1).camera<.22&&exitSamples.at(-1).flip<.22,'Capture controls must fade nearly transparent before being hidden');
+    assert(reviewStarted-reviewingStarted>=100,'Review actions must wait for the complete capture control fade');
   }
   assert(shutter.hidden&&flip.hidden&&!document.getElementById('again').hidden&&!document.getElementById('submit').hidden,'Review must replace both capture controls with Retake and Submit');
-  return {clickReturnMs,preparationFrames:preparation.frames,preparationDurationMs:preparation.durationMs,preparingFrames,paintingFrames,transitionStates:states,exactFrozenFirstFrame:true,retainedCaptureControls:true,visibilityPauseVerified,bloomReplayed:reduced?null:true,bloomStartTime,exitFadeMs:reviewStarted-reviewingStarted,exitSamples,reviewEntrance};
+  return {clickReturnMs,initialPixelChecksMs,synchronousChecksMs,preparationFrames:preparation.frames,preparationDurationMs:preparation.durationMs,preparingFrames,paintingFrames,transitionStates:states,exactFrozenFirstFrame:true,retainedCaptureControls:true,visibilityPauseVerified,bloomReplayed:reduced?null:true,bloomStartTime,bloomSamples,exitFadeMs:reviewStarted-reviewingStarted,exitSamples,reviewEntrance,...inkCheck};
 }
 function assertFrozenSource() {
   assert(snapshotCanvas.width===snapshotPixels.width&&snapshotCanvas.height===snapshotPixels.height,'Frozen source dimensions changed after capture');
@@ -399,8 +431,56 @@ async function checkAfterSubmit() {
   assertCanvasPreview();
   return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,observedStates,boundsDelta,collectionRetainedWhileReopening:true,clearedSubmission:true,cameraReady:true};
 }
+async function checkFlipTransition() {
+  // Run this independent check after the full flow; its extra camera request
+  // intentionally does not change the fixed counts expected by the earlier checks.
+  await waitForFlipReady();
+  const studio=document.getElementById('studio'),shutter=document.getElementById('shutter'),flip=document.getElementById('flip-camera');
+  const priorRequests=requests,priorSnapshots=snapshotCount,oldStream=cameraStream,priorFacing=requestOptions.video.facingMode.ideal;
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,exitSamples=[];
+  let releaseCamera;
+  cameraRequestGate=new Promise(resolve=>{releaseCamera=resolve;});
+  try {
+    flip.click();
+    assert(studio.dataset.state==='loading','Switching cameras must enter loading');
+    assert(shutter.disabled&&flip.disabled,'Loading must disable both outgoing camera controls');
+    assert(oldStream.getTracks().every(track=>track.readyState==='ended'),'Switching cameras must stop the old camera stream');
+    if(!reduced) {
+      assert(!shutter.hidden&&!flip.hidden,'Outgoing controls must remain mounted during their loading fade');
+      [shutter,flip].forEach(button=>{
+        const animation=opacityAnimation(button);
+        assert(animation&&Number(animation.effect.getTiming().duration)===140,'Loading should fade each camera control out over 140ms');
+      });
+    }
+    const started=performance.now(),deadline=started+2000;
+    while(!shutter.hidden||!flip.hidden) {
+      assert(performance.now()<deadline,'Camera controls did not finish hiding while loading');
+      const sample={timeMs:performance.now()-started,camera:effectiveOpacity(shutter),flip:effectiveOpacity(flip)};
+      const prior=exitSamples.at(-1);
+      assert(Math.abs(sample.camera-sample.flip)<.08,'Camera and Flip must fade together when loading');
+      if(prior)assert(sample.camera<=prior.camera+.025&&sample.flip<=prior.flip+.025,'Loading fade must not brighten or snap back');
+      exitSamples.push(sample);
+      await new Promise(requestAnimationFrame);
+    }
+    assert(studio.dataset.state==='loading'&&shutter.hidden&&flip.hidden,'Loading must not leave a disabled camera placeholder visible');
+    if(!reduced) {
+      assert(exitSamples[0].camera>.9&&exitSamples[0].flip>.9,'Loading fade must begin visibly, without a hidden ancestor snapping it away');
+      assert(exitSamples.filter(sample=>sample.camera>.08&&sample.camera<.92).length>=2,'Loading fade must contain multiple intermediate opacity samples');
+    }
+    cameraRequestGate=null;releaseCamera();
+    await waitForState('ready');
+    const entrance=await assertControlEntrance([shutter,flip],'Returning camera controls',90);
+    assert(requests===priorRequests+1&&snapshotCount===priorSnapshots,'Flip must request one camera without taking a photograph');
+    assert(requestOptions.video.facingMode.ideal!==priorFacing,'Flip must request the opposite facing camera');
+    assert(!shutter.hidden&&!flip.hidden&&!shutter.disabled&&!flip.disabled,'Ready must restore both usable camera controls');
+    assert(cameraStream.getTracks().every(track=>track.readyState==='live'),'Switched camera stream must be live');
+    assertCanvasPreview();
+    return {passed:true,cameraRequests:requests,snapshotCount,loadingHasNoPlaceholder:true,exitSamples,entrance,cameraReady:true};
+  } finally {cameraRequestGate=null;releaseCamera?.();}
+}
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_retake_checks',description:'After the capture check, verify Retake opens a fresh synthetic camera and starts from clean paper. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkRetake});
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_capture_checks',description:'Run the complete shutter and watercolor flow against a synthetic video feed. Does not access a physical camera.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkCapture});
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_submit_checks',description:'After capture and Retake checks, verify a double Submit runs one local collection animation without extra camera captures or uploads. Ends on the completed mosaic for visual inspection.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkSubmit});
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_after_submit_checks',description:'After Submit checks and visual inspection, verify Capture another clears the mosaic and opens a fresh synthetic camera. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkAfterSubmit});
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_flip_transition_checks',description:'After the full capture/retake/submit/return flow, verify Flip fades camera controls through loading, leaves no disabled placeholder, and fades a new live camera back in. Adds one synthetic camera request; does not take a photo.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkFlipTransition});
 </script></body></html>

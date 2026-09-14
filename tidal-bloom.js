@@ -240,7 +240,7 @@ function* prepare({ width, height, photo }) {
         bctx.putImageData(bathPixels, 0, 0);
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(bath, 0, 0, width, height);
-        // The full pencil sketch appears in 140 ms, then sinks beneath the
+        // The full pencil sketch appears in about 120 ms, then sinks beneath the
         // watercolor; a much softer trace remains baked into the final image.
         reveal(ctx, graphite, sketchMask);
         reveal(ctx, painted, mask);
@@ -287,7 +287,7 @@ export default {
   id: '01',
   name: 'Tidal Bloom',
   description: 'Natural watercolor follows delicate pencil into a softly branching bloom.',
-  duration: 2000,
+  duration: 1700,
   create(options) {
     const sequence = prepare(options);
     let step;

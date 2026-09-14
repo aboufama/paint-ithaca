@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Fraunces:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=controls-3">
-  <script type="module" src="app.js?v=controls-3"></script>
+  <link rel="stylesheet" href="styles.css?v=clip-4">
+  <script type="module" src="app.js?v=clip-4"></script>
 </head>
 <body>
   <header class="topbar"><a class="wordmark" href="./" aria-label="Paint Ithaca home">paint ithaca<span>.</span></a></header>
@@ -25,7 +25,7 @@
     </div>
     <div class="capture-controls">
       <div class="side-control"><button id="again" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7"/></svg><span id="again-label">Retake</span></button><button id="flip-camera" class="quiet-button" aria-label="Switch camera" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg><span>Flip</span></button></div>
-      <button id="shutter" aria-label="Take photo" disabled><span class="button-bloom" aria-hidden="true"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6 1.5-2h5L16 6h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12.5" r="3.5"/></svg></button>
+      <button id="shutter" aria-label="Take photo" disabled hidden><span class="button-ink" aria-hidden="true"><img class="button-bloom" src="assets/button-bloom.svg?v=clip-4" alt="" draggable="false" decoding="sync"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6 1.5-2h5L16 6h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12.5" r="3.5"/></svg></button>
       <div class="side-control"><button id="submit" class="quiet-button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5"/></svg><span>Submit</span></button></div>
     </div>
     <p id="instruction" class="instruction" role="status"></p>

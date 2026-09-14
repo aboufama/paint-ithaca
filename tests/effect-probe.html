@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Combined watercolor verification</title><style>body{margin:32px;background:#f5f3ec;color:#53554e;font:14px system-ui}main{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;max-width:1200px;margin:auto}figure{margin:0}canvas{width:100%;border-radius:6px;display:block}figcaption{margin:12px 0}p{text-align:center}button{display:block;margin:24px auto;padding:12px 24px;border:0;background:#ded6e4;border-radius:5px}#playback{width:240px;margin:auto}@media(max-width:600px){main{grid-template-columns:1fr 1fr}}</style></head><body><main></main><button id="replay">Replay combined animation</button><canvas id="playback" width="800" height="1000" aria-label="Combined watercolor playback"></canvas><p>Test photograph: Cayuga Lake — Acurarri, CC BY-SA 4.0. Test page excluded from deployment.</p>
 <script type="module">
-import effect from '../tidal-bloom.js?v=quick-1';
+import effect from '../tidal-bloom.js?v=clip-4';
 const photo = new Image();photo.src='./fixtures/cayuga-lake.jpg';await photo.decode();
 const source=document.createElement('canvas');source.width=800;source.height=1000;source.getContext('2d').drawImage(photo,192,0,576,720,0,0,800,1000);
 const renderer=effect.create({width:800,height:1000,photo:source});
