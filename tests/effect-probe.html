@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Combined watercolor verification</title><style>body{margin:32px;background:#f5f3ec;color:#53554e;font:14px system-ui}main{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;max-width:1200px;margin:auto}figure{margin:0}canvas{width:100%;border-radius:6px;display:block}figcaption{margin:12px 0}p{text-align:center}button{display:block;margin:24px auto;padding:12px 24px;border:0;background:#ded6e4;border-radius:5px}#playback{width:240px;margin:auto}@media(max-width:600px){main{grid-template-columns:1fr 1fr}}</style></head><body><main></main><button id="replay">Replay combined animation</button><canvas id="playback" width="800" height="1000" aria-label="Combined watercolor playback"></canvas><p>Test photograph: Cayuga Lake — Acurarri, CC BY-SA 4.0. Test page excluded from deployment.</p>
+<script type="module">
+import effect from '../tidal-bloom.js?v=combined-1';
+const photo = new Image();photo.src='./fixtures/cayuga-lake.jpg';await photo.decode();
+const source=document.createElement('canvas');source.width=800;source.height=1000;source.getContext('2d').drawImage(photo,192,0,576,720,0,0,800,1000);
+const renderer=effect.create({width:800,height:1000,photo:source});
+for(const p of [.08,.24,.48,1]) {const fig=document.createElement('figure'),canvas=document.createElement('canvas'),caption=document.createElement('figcaption');canvas.width=800;canvas.height=1000;renderer.draw(canvas.getContext('2d'),p);caption.textContent=p===1?'Finished':`${Math.round(p*100)}%`;fig.append(canvas,caption);document.querySelector('main').append(fig);}
+const output=document.getElementById('playback'),ctx=output.getContext('2d');renderer.draw(ctx,1);let raf;
+document.getElementById('replay').onclick=()=>{cancelAnimationFrame(raf);const start=performance.now();function draw(now){const p=Math.min(1,(now-start)/effect.duration);renderer.draw(ctx,p);if(p<1)raf=requestAnimationFrame(draw);}raf=requestAnimationFrame(draw);};
+function assert(condition,message){if(!condition)throw new Error(message);}
+function pixels(){return ctx.getImageData(0,0,800,1000).data;}
+function checksum(data){let hash=0;for(let i=0;i<data.length;i+=13)hash=(Math.imul(hash,31)+data[i])>>>0;return hash;}
+async function checks(){
+  renderer.draw(ctx,.24);const first=checksum(pixels());renderer.draw(ctx,.68);renderer.draw(ctx,.24);assert(first===checksum(pixels()),'Replay must be deterministic');
+  const times=[];for(let i=0;i<40;i++){const start=performance.now();renderer.draw(ctx,i/39);times.push(performance.now()-start);}times.sort((a,b)=>a-b);
+  const grayscale=document.createElement('canvas');grayscale.width=320;grayscale.height=400;const gc=grayscale.getContext('2d');gc.fillStyle='#808080';gc.fillRect(0,0,320,400);
+  const neutral=effect.create({width:320,height:400,photo:grayscale});neutral.draw(gc,1);const d=gc.getImageData(0,0,320,400).data;let spread=0;for(let i=0;i<d.length;i+=4)spread+=Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2]);spread/=d.length/4;neutral.dispose();assert(spread<8,'Gray input acquired a strong color cast');
+  return {passed:true,repeatable:true,grayInputMeanChannelSpread:spread,medianFrameMs:times[20],p95FrameMs:times[38],durationMs:effect.duration};
+}
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_combined_effect_checks',description:'Verify deterministic replay, neutral photo color, and frame timing of the combined effect using test images.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checks});
+window.addEventListener('pagehide',()=>{cancelAnimationFrame(raf);renderer.dispose();});
+</script></body></html>

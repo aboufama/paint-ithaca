@@ -1,9 +1,9 @@
 # Point, tap, bloom
 
-The live phone camera is the starting screen. The shutter is the only primary action. There is no reference image, “Use my camera” section, or headline above the viewfinder.
+The live phone camera is the starting screen. The shutter is the only primary action, with no reference photo or headline above the viewfinder.
 
-A tap freezes the exact visible frame. The camera stops immediately, while a wet spot near the center expands into an irregular watercolor frontier. Color fills the image in two seconds and settles for another 0.8 seconds. The painted interior retains photographic detail; the outer edge carries the real pigment transport, feathering and pooling. The final frame offers Retake and Save without changing the layout.
+A tap freezes the visible frame and stops the camera. Tidal Bloom spreads a feathery wash from a single point over 2.8 seconds, using Prussian Sunprint’s irregular developing edge without its blue color treatment. A little of Graphite Blooms adds delicate pencil contours around the emerging color and subtle shading in the finished photograph. The photo keeps its natural colors. The final frame offers Retake and Save. There is one effect and no pause button or effect selector.
 
-The paper has a subtle 6px radius and subdued grain. Cream, sage and lavender surround the image. Native click and keyboard button activation replace all hold/release behavior.
+The viewfinder has a subtle 6px radius. Cream, sage and lavender surround the image. Native click and keyboard activation require no holding.
 
-Camera permission is requested on startup. A permission or device problem is explained inside the viewfinder with a retry action. No stock-photo fallback is shown. The demo does not upload photos or access the microphone.
+Camera permission is requested on startup. Device or permission problems appear inside the viewfinder with a retry action. Photos stay on the device and the microphone is never requested.

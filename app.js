@@ -1,16 +1,17 @@
-import { Watercolor } from './watercolor.js';
-import { Bloom } from './bloom.js';
+import TidalBloom from './tidal-bloom.js?v=combined-1';
 import { CaptureSession } from './capture-session.js';
 
 const $ = id => document.getElementById(id);
 const video = $('source-video'), canvas = $('painting'), shutter = $('shutter');
 video.controls = false; video.disablePictureInPicture = true; video.disableRemotePlayback = true;
 const source = document.createElement('canvas'); source.width = 800; source.height = 1000;
-const sourceContext = source.getContext('2d', { alpha: false });
-const bloom = new Bloom(), session = new CaptureSession();
-let engine, stream, ready = false, generation = 0, facing = 'environment', mirrored = false;
-let raf = 0, lastFrame = null, accumulator = 0, lastMaskFrame = 0, disposed = false;
-let recorder, recordingStream, recordedBlob, chunks = [], downloadUrl;
+const sourceContext = source.getContext('2d', { alpha: false, willReadFrequently: true });
+canvas.width = source.width; canvas.height = source.height;
+const paintingContext = canvas.getContext('2d', { alpha: false });
+const session = new CaptureSession({ paintDuration: TidalBloom.duration });
+let painting, stream, ready = false, generation = 0, facing = 'environment', mirrored = false;
+let raf = 0, lastFrame = null, renderedFrames = 0, disposed = false;
+let recorder, recordingStream, recordedBlob, chunks = [], downloadUrl, finishTimer;
 const completed = [];
 
 function state(value) { $('studio').dataset.state = value; shutter.hidden = ['painting','settling','finishing','review'].includes(value); }
@@ -25,12 +26,13 @@ function schedule() { if (!raf && !document.hidden && session.active && !dispose
 async function openCamera() {
   if (session.active || disposed) return;
   const token = ++generation; ready = false; shutter.disabled = true; stopCamera();
+  painting?.dispose(); painting = null;
   session.reset(); video.hidden = false; canvas.setAttribute('aria-hidden', 'true'); state('loading'); message('Allow camera access to begin.');
   $('instruction').textContent = 'Find your little corner of Ithaca.';
   $('again').hidden = true; $('save').hidden = true; $('flip-camera').hidden = true;
   if (!navigator.mediaDevices?.getUserMedia) { state('error'); message('Open this page in Safari or Chrome to use your camera.', true); return; }
   try {
-    engine ||= new Watercolor(canvas, { automatic: false });
+    if (!paintingContext || !sourceContext) throw new Error('Canvas unavailable');
     const next = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
       facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 1600 }, frameRate: { ideal: 24, max: 30 }
     } });
@@ -58,7 +60,7 @@ async function openCamera() {
       NotFoundError: 'No camera found. Open this on your phone.',
       NotReadableError: 'Your camera is busy. Close other camera apps and try again.'
     };
-    message(copy[error.name] || (engine ? 'Your camera couldn’t start. Try again.' : 'This effect needs a browser with WebGL2. Try Safari or Chrome.'), Boolean(engine));
+    message(copy[error.name] || 'Your camera couldn’t start. Try again.', true);
   }
 }
 function snapshot() {
@@ -72,14 +74,22 @@ function snapshot() {
 }
 function capture() {
   if (!ready || shutter.disabled || session.state !== 'ready' || !snapshot()) return false;
-  if (!session.begin()) return false;
   ready = false; ++generation; shutter.disabled = true; $('flip-camera').hidden = true;
   recordedBlob = null; chunks = []; URL.revokeObjectURL(downloadUrl); downloadUrl = null;
-  bloom.clear(); engine.updateCoverage(bloom.canvas); engine.setLiveSource(source); engine.setWater(.64); engine.setRecording(true);
   // This is the only camera-to-photo copy. All later frames paint this frozen photo.
-  stopCamera(); video.hidden = true; canvas.setAttribute('aria-hidden', 'false'); state('painting'); message(''); $('instruction').textContent = 'Let it bloom.';
+  stopCamera();
+  try {
+    painting?.dispose(); painting = null;
+    painting = TidalBloom.create({ width: canvas.width, height: canvas.height, photo: source });
+    painting.draw(paintingContext, 0);
+  } catch {
+    painting?.dispose(); painting = null;
+    state('error'); message('Couldn’t paint this photo. Tap to try again.', true); return false;
+  }
+  session.begin();
+  video.hidden = true; canvas.setAttribute('aria-hidden', 'false'); state('painting'); message(''); $('instruction').textContent = 'Let it bloom.';
   $('studio').style.setProperty('--progress', 0);
-  beginRecorder(); accumulator = 0; lastFrame = null; lastMaskFrame = 0; schedule(); return true;
+  beginRecorder(); renderedFrames = 1; lastFrame = null; schedule(); return true;
 }
 function beginRecorder() {
   recorder = null; stopRecordingTracks();
@@ -103,20 +113,21 @@ function frame(now) {
   raf = 0;
   if (document.hidden || !session.active || disposed) { lastFrame = null; return; }
   const delta = lastFrame === null ? 0 : Math.min(80, now - lastFrame); lastFrame = now;
-  session.advance(delta); accumulator += delta;
-  if (now - lastMaskFrame >= 28 || session.progress === 1) {
-    bloom.paint(session.progress); engine.updateCoverage(bloom.canvas); lastMaskFrame = now;
-  }
-  const steps = Math.min(10, Math.floor(accumulator / (1000/120)));
-  for (let i = 0; i < steps; i++) engine.step();
-  accumulator -= steps * (1000/120);
-  if (session.progress === 1 && steps > 0) engine.setRecording(false);
-  engine.render(); $('studio').style.setProperty('--progress', session.progress);
+  session.advance(delta);
+  painting.draw(paintingContext, session.progress); renderedFrames++;
+  $('studio').style.setProperty('--progress', session.progress);
   state(session.active ? session.state : 'finishing');
   if (session.state === 'review') {
     cancelFrame();
-    if (recorder && ['recording','paused'].includes(recorder.state)) { try { recorder.stop(); } catch { stopRecordingTracks(); showReview(); } }
-    else showReview();
+    if (recorder && ['recording','paused'].includes(recorder.state)) {
+      // Give the canvas stream time to include the finished painting in the film.
+      recordingStream?.getVideoTracks()[0]?.requestFrame?.();
+      finishTimer = setTimeout(() => {
+        if (disposed) return;
+        try { if (recorder && recorder.state !== 'inactive') recorder.stop(); else showReview(); }
+        catch { stopRecordingTracks(); showReview(); }
+      }, 150);
+    } else showReview();
   } else schedule();
 }
 function showReview() {
@@ -124,7 +135,7 @@ function showReview() {
   state('review'); $('instruction').textContent = '';
   $('again').hidden = false; $('save').hidden = false;
   $('save-label').textContent = recordedBlob ? 'Save film' : 'Save photo';
-  completed.splice(0).forEach(resolve => resolve({ state: session.state, durationMs: session.elapsed, simulationSteps: engine.steps, recordedBytes: recordedBlob?.size || 0 }));
+  completed.splice(0).forEach(resolve => resolve({ state: session.state, effect: TidalBloom.name, durationMs: session.elapsed, renderedFrames, recordedBytes: recordedBlob?.size || 0 }));
 }
 shutter.addEventListener('click', capture);
 $('again').addEventListener('click', openCamera);
@@ -155,8 +166,8 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', event => {
   suspend();
   if (!event.persisted) {
-    disposed = true; if (recorder && recorder.state !== 'inactive') recorder.stop();
-    stopRecordingTracks(); engine?.dispose(); URL.revokeObjectURL(downloadUrl);
+    disposed = true; clearTimeout(finishTimer); if (recorder && recorder.state !== 'inactive') recorder.stop();
+    stopRecordingTracks(); painting?.dispose(); URL.revokeObjectURL(downloadUrl);
   }
 });
 window.addEventListener('pageshow', event => { if (event.persisted && session.active) { if (recorder?.state === 'paused') recorder.resume(); schedule(); } });
