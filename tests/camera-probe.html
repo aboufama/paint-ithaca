@@ -1,13 +1,36 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=quick-1"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic camera integration fixture</title><link rel="stylesheet" href="../styles.css?v=submit-2"></head><body>
 <script type="module">
 import TidalBloom from '../tidal-bloom.js?v=quick-1';
+import { SubmissionScene } from '../submission-scene.js?v=submit-2';
 // Test only. This page is excluded from the published build and never opens a real camera.
 const sourceImage = new Image(); sourceImage.src = './fixtures/cayuga-lake.jpg'; await sourceImage.decode();
 const feed = document.createElement('canvas'); feed.width = 800; feed.height = 1000;
 const context = feed.getContext('2d');
 context.drawImage(sourceImage,192,0,576,720,0,0,800,1000);
 let feedTimer;
-let requests = 0, cameraStream, snapshotCount = 0, snapshotPixels, snapshotCanvas, requestOptions;
+let requests = 0, cameraStream, snapshotCount = 0, previewFrames = 0, snapshotPixels, snapshotCanvas, requestOptions;
+let scenePreparations = 0, sceneFinals = 0, mosaicImages = 0, mosaicTiles = 0, submissionStartPixels, exactSubmissionStart = false;
+const networkRequests = [];
+const originalFetch = window.fetch.bind(window);
+window.fetch = (input, options = {}) => {
+  networkRequests.push({url: String(input?.url || input), method: options.method || input?.method || 'GET', hasBody: Boolean(options.body)});
+  return originalFetch(input, options);
+};
+const originalPrepare = SubmissionScene.prototype.prepare;
+SubmissionScene.prototype.prepare = async function(photo, options) {
+  scenePreparations++; mosaicImages = options.images.length;
+  await originalPrepare.call(this, photo, options);
+  mosaicTiles = this.tiles.length + 1;
+};
+const originalSceneDraw = SubmissionScene.prototype.draw;
+SubmissionScene.prototype.draw = function(progress) {
+  originalSceneDraw.call(this, progress);
+  if (progress === 0 && submissionStartPixels) {
+    const actual = this.context.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
+    exactSubmissionStart = actual.every((value, index) => value === submissionStartPixels[index]);
+  }
+  if (progress === 1) sceneFinals++;
+};
 Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{
   async getUserMedia(options) { requests++; requestOptions = options; cameraStream = feed.captureStream(24); clearInterval(feedTimer); feedTimer=setInterval(()=>context.drawImage(sourceImage,192,0,576,720,0,0,800,1000),40); return cameraStream; },
   async enumerateDevices() { return [{kind:'videoinput',deviceId:'fixture-camera'}]; }
@@ -15,24 +38,43 @@ Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{
 const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
 CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
   const result = originalDraw.call(this,image,...args);
-  if(image instanceof HTMLVideoElement) { snapshotCount++; snapshotCanvas=this.canvas; snapshotPixels=this.getImageData(0,0,this.canvas.width,this.canvas.height); }
+  if(image instanceof HTMLVideoElement && this.canvas.id==='capture-source') { snapshotCount++; snapshotCanvas=this.canvas; snapshotPixels=this.getImageData(0,0,this.canvas.width,this.canvas.height); }
+  if(image instanceof HTMLVideoElement && this.canvas.id==='camera-preview') previewFrames++;
   return result;
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=quick-1');
-function waitForState(name) { return new Promise(resolve=>{
+await import('../app.js?v=submit-2');
+function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
-  const observer=new MutationObserver(()=>{if(element.dataset.state===name){observer.disconnect();resolve();}});observer.observe(element,{attributes:true,attributeFilter:['data-state']});
+  const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
+  const observer=new MutationObserver(()=>{if(element.dataset.state===name){clearTimeout(timeout);observer.disconnect();resolve();}});observer.observe(element,{attributes:true,attributeFilter:['data-state']});
 }); }
 function assert(condition,text) { if(!condition)throw new Error(text); }
-function assertTidalBloomFinish(canvas, pixels) {
-  assert(canvas.width===snapshotPixels.width&&canvas.height===snapshotPixels.height,'Painting must preserve the frozen snapshot dimensions');
+function assertFrozenSource() {
   assert(snapshotCanvas.width===snapshotPixels.width&&snapshotCanvas.height===snapshotPixels.height,'Frozen source dimensions changed after capture');
   const currentSnapshot=snapshotCanvas.getContext('2d').getImageData(0,0,snapshotCanvas.width,snapshotCanvas.height).data;
   let changedSourceChannels=0;
   for(let i=0;i<currentSnapshot.length;i++)if(currentSnapshot[i]!==snapshotPixels.data[i])changedSourceChannels++;
   assert(changedSourceChannels===0,`Frozen source changed after capture in ${changedSourceChannels} channels`);
+}
+function assertCanvasPreview() {
+  const preview=document.getElementById('camera-preview');
+  const video=document.getElementById('source-video');
+  const previewStyle=getComputedStyle(preview),videoStyle=getComputedStyle(video),videoBounds=video.getBoundingClientRect();
+  assert(previewFrames>0,'Live preview must draw camera frames into the visible canvas');
+  assert(preview.getAttribute('aria-hidden')==='false','Live canvas preview should be available when camera is ready');
+  assert(previewStyle.display!=='none'&&previewStyle.visibility!=='hidden'&&Number(previewStyle.opacity)>0,'Live canvas preview is not visible');
+  assert(preview.getBoundingClientRect().width>100,'Live preview is too small to frame a photo');
+  assert(video.getAttribute('aria-hidden')==='true','Native video must stay hidden from accessibility controls');
+  assert(!video.controls,'Native playback controls must not be offered');
+  const videoIsInvisible=videoStyle.display==='none'||videoStyle.visibility==='hidden'||Number(videoStyle.opacity)===0
+    ||videoBounds.right<=0||videoBounds.bottom<=0||(videoBounds.width<=1&&videoBounds.height<=1);
+  assert(videoIsInvisible,'The canvas should be the visible camera surface, not the native video');
+}
+function assertTidalBloomFinish(canvas, pixels) {
+  assert(canvas.width===snapshotPixels.width&&canvas.height===snapshotPixels.height,'Painting must preserve the frozen snapshot dimensions');
+  assertFrozenSource();
   const reference=document.createElement('canvas');reference.width=canvas.width;reference.height=canvas.height;
   const expectedContext=reference.getContext('2d',{alpha:false});
   // Keep the source representation identical: filtering a reused video canvas
@@ -52,6 +94,7 @@ async function checkCapture() {
   await waitForState('ready');
   assert(requests===1,'Camera should request permission once on startup');
   assert(requestOptions.audio===false,'Camera must not request microphone');
+  assertCanvasPreview();
   const shutter=document.getElementById('shutter');assert(!shutter.disabled,'Shutter not enabled after video ready');
   assert(snapshotCount===0,'Photo captured before clicking');
   shutter.click();shutter.click();
@@ -73,14 +116,16 @@ async function checkCapture() {
   }
   const meanColorError=error/count;assert(meanColorError<50,'Frozen photo detail or color was lost');
   const selectedEffect=assertTidalBloomFinish(canvas,pixels);
-  assert(!document.getElementById('save').hidden,'Save must be available after completion');
+  assert(!document.getElementById('submit').hidden,'Submit must be available after completion');
+  assert(!document.getElementById('save'),'Save should be removed from the camera flow');
   assert(!document.getElementById('again').hidden,'Retake must be available after completion');
-  return {passed:true,cameraRequests:requests,snapshotCount,cameraStopped:true,meanColorError,...selectedEffect,outcome:'One click captured one immutable photo and rendered the selected Tidal Bloom effect.'};
+  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,canvasPreview:true,cameraStopped:true,meanColorError,...selectedEffect,outcome:'One click captured one immutable photo and rendered the selected Tidal Bloom effect.'};
 }
 async function checkRetake() {
   assert(document.getElementById('studio').dataset.state==='review','Run capture checks before Retake');
   document.getElementById('again').click();await waitForState('ready');
   assert(requests===2,'Retake must open a fresh camera stream');
+  assertCanvasPreview();
   document.getElementById('shutter').click();
   const canvas=document.getElementById('painting'),paintingContext=canvas.getContext('2d');
   const pixel=paintingContext.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data;
@@ -91,6 +136,50 @@ async function checkRetake() {
   const selectedEffect=assertTidalBloomFinish(canvas,paintingContext.getImageData(0,0,canvas.width,canvas.height).data);
   return {passed:true,cameraRequests:requests,snapshotCount,cleanPaperAtStart:true,...selectedEffect};
 }
+async function checkSubmit() {
+  const studio=document.getElementById('studio'),submit=document.getElementById('submit');
+  assert(studio.dataset.state==='review'&&snapshotCount===2,'Run capture and Retake checks before Submit');
+  const canvas=document.getElementById('painting');
+  submissionStartPixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+  submit.click();submit.click();
+  assert(studio.dataset.state==='submitting','Submit should start the collection animation immediately');
+  assert(submit.disabled&&submit.hidden,'Submit must prevent a second submission');
+  assert(document.getElementById('again').hidden,'Retake should wait for the short submit animation');
+  assert(document.getElementById('shutter').hidden,'No camera control should appear during submission');
+  assert(studio.getAttribute('aria-busy')==='true','Submission must expose its busy state');
+  await waitForState('submitted');
+  assert(scenePreparations===1&&sceneFinals===1,'Double Submit should render one complete collection animation');
+  assert(exactSubmissionStart||matchMedia('(prefers-reduced-motion: reduce)').matches,'Submission must begin at the unchanged painting');
+  assert(mosaicImages>=4&&mosaicTiles>=40,'Collection should contain many real, locally bundled images');
+  assert(snapshotCount===2&&requests===2,'Submit must reuse the captured painting without reopening or recapturing the camera');
+  assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera must remain stopped throughout Submit');
+  assertFrozenSource();
+  assert(networkRequests.every(request=>request.method.toUpperCase()==='GET'&&!request.hasBody),'Frontend submission preview must not upload camera data');
+  assert(document.getElementById('instruction').textContent==='Added to preview','Completion should accurately describe this local preview');
+  assert(document.getElementById('again-label').textContent==='Capture another','Completion should offer another capture');
+  assert(!document.getElementById('again').hidden&&submit.hidden,'Completed view should expose only the next-capture action');
+  assert(!studio.hasAttribute('aria-busy'),'Completed view must clear its busy state');
+  return {passed:true,cameraRequests:requests,snapshotCount,scenePreparations,sceneFinals,exactSubmissionStart,mosaicImages,mosaicTiles,localPreviewOnly:true,frozenSourceUnchanged:true,outcome:'The painting joined the collection once; no camera photo was uploaded.'};
+}
+async function checkAfterSubmit() {
+  const studio=document.getElementById('studio');
+  assert(studio.dataset.state==='submitted','Run Submit checks before Capture another');
+  const priorPreviewFrames=previewFrames;
+  document.getElementById('again').click();
+  assert(document.getElementById('painting').getAttribute('aria-hidden')==='true','New camera must hide the completed collection');
+  assert(document.getElementById('instruction').textContent==='','New camera must clear completion text');
+  assert(document.getElementById('submit').hidden,'New camera must hide the old Submit action');
+  await waitForState('ready');
+  assert(requests===3,'Capture another should open exactly one new camera stream');
+  assert(snapshotCount===2,'Capture another should wait for the next shutter click');
+  assert(previewFrames>priorPreviewFrames,'New camera should replace the collection with a fresh live preview');
+  assert(cameraStream.getTracks().every(track=>track.readyState==='live'),'New camera stream must be live');
+  assert(!document.getElementById('shutter').hidden&&!document.getElementById('shutter').disabled,'New capture must enable the shutter');
+  assertCanvasPreview();
+  return {passed:true,cameraRequests:requests,snapshotCount,previewFrames,clearedSubmission:true,cameraReady:true};
+}
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_retake_checks',description:'After the capture check, verify Retake opens a fresh synthetic camera and starts from clean paper. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkRetake});
 if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_capture_checks',description:'Run the complete shutter and watercolor flow against a synthetic video feed. Does not access a physical camera.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkCapture});
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_submit_checks',description:'After capture and Retake checks, verify a double Submit runs one local collection animation without extra camera captures or uploads. Ends on the completed mosaic for visual inspection.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkSubmit});
+if(document.modelContext?.registerTool)document.modelContext.registerTool({name:'run_camera_after_submit_checks',description:'After Submit checks and visual inspection, verify Capture another clears the mosaic and opens a fresh synthetic camera. No physical camera access.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute:checkAfterSubmit});
 </script></body></html>
