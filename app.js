@@ -165,7 +165,7 @@ async function submitPhoto() {
 function finishSubmission() {
   cancelFrame(); submission = 'complete'; state('submitted'); $('studio').removeAttribute('aria-busy');
   canvas.setAttribute('aria-label', 'Your photo among a collection of Ithaca images');
-  $('instruction').textContent = 'Added to preview'; $('again-label').textContent = 'Capture another'; $('again').hidden = false;
+  $('instruction').textContent = 'Thanks for contributing to the Paint Ithaca project :)'; $('again-label').textContent = 'Capture another'; $('again').hidden = false;
   if (restoreSubmitFocus) $('again').focus({ preventScroll: true });
 }
 shutter.addEventListener('click', capture);

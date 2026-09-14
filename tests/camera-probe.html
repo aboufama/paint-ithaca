@@ -44,7 +44,7 @@ CanvasRenderingContext2D.prototype.drawImage = function(image,...args) {
 };
 const html = new DOMParser().parseFromString(await (await fetch('../index.html')).text(),'text/html');
 document.body.append(...Array.from(html.body.children));
-await import('../app.js?v=submit-2');
+await import('../app.js?v=thanks-1');
 function waitForState(name) { return new Promise((resolve,reject)=>{
   const element=document.getElementById('studio');if(element.dataset.state===name){resolve();return;}
   const timeout=setTimeout(()=>{observer.disconnect();reject(new Error(`Timed out waiting for ${name}; current state: ${element.dataset.state}`));},12000);
@@ -155,7 +155,7 @@ async function checkSubmit() {
   assert(cameraStream.getTracks().every(track=>track.readyState==='ended'),'Camera must remain stopped throughout Submit');
   assertFrozenSource();
   assert(networkRequests.every(request=>request.method.toUpperCase()==='GET'&&!request.hasBody),'Frontend submission preview must not upload camera data');
-  assert(document.getElementById('instruction').textContent==='Added to preview','Completion should accurately describe this local preview');
+  assert(document.getElementById('instruction').textContent==='Thanks for contributing to the Paint Ithaca project :)','Completion should show the requested thank-you message');
   assert(document.getElementById('again-label').textContent==='Capture another','Completion should offer another capture');
   assert(!document.getElementById('again').hidden&&submit.hidden,'Completed view should expose only the next-capture action');
   assert(!studio.hasAttribute('aria-busy'),'Completed view must clear its busy state');
